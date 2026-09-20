@@ -87,6 +87,18 @@ the launcher instead of assuming a path.
 
 ## Release
 
+- **Hermes Linux 1.0.3** — https://github.com/romeomile/Hermes-Android-Linux/releases/tag/v1.0.3
+- Asset: `HermesLinux-1.0.3-debug.apk`, 224,010,520 bytes,
+  sha256 `7f175c83f74be1339cf775a00abdbfd43f74415dbe1b31803ebe8c0f66782c59` (verified by downloading
+  the published asset back: same sha256 as the local build, `aapt2 dump badging` reads
+  `versionCode='4' versionName='1.0.3'`, and the guest disk inside it is image v11 — sha256
+  `5c4b0072a25f502066f64987587565a7324cea3c46c296575e362fbb0be4f4dc`). `versionCode 4`,
+  `versionName 1.0.3`, package `com.romirmile.hermeslinux`, debug-signed.
+- Carries: the dashboard's chat working inside the guest (Node + prebuilt TUI + ESM marker + the
+  gateway budget + lazy installs off), the user-sized guest disk (20 GB default), the guest-image
+  marker bump, and the raised device-side waits. See the section above for the receipts.
+- Local copies: `/root/hermes-android-linux-dist/HermesLinux-1.0.3-debug.apk` and
+  `RELEASE_NOTES-1.0.3.md`.
 - **Hermes Linux 1.0.2** — https://github.com/romeomile/Hermes-Android-Linux/releases/tag/v1.0.2
 - Asset: `HermesLinux-1.0.2-debug.apk`, 202,885,388 bytes,
   sha256 `675e3c5d5cc7ef87516b970b84d301693a92e2fbbe3a1ab13adb9d00693694a8` (verified by downloading
