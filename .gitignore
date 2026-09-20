@@ -1,0 +1,25 @@
+# Build output
+build/
+app/build/
+android/app/build/
+.gradle/
+.kotlin/
+local.properties
+*.iml
+.idea/
+captures/
+
+# Guest image build workspace
+.image-build/
+dist/
+
+# The guest disk image is ~100 MB (over GitHub's per-file limit) - build it with
+# image/build_guest_image.sh, or fetch it from the release assets.
+app/src/main/assets/vm/base.qcow2.gz
+
+# Secrets / keys - never commit
+*.jks
+*.keystore
+keystore.properties
+*.pem
+.env

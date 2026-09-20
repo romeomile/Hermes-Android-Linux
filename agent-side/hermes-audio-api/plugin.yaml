@@ -1,0 +1,4 @@
+name: hermes-audio-api
+version: 1.1.0
+description: "Give the api_server the agent's own speech endpoints (POST /api/audio/speak and its /v1/audio/speak mirror, POST /api/audio/transcribe, GET /api/audio/voice-config) so any OpenAI-compatible client — a phone app, another frontend — can speak with the provider/voice/credential configured on THIS agent instead of shipping its own speech key. Upstream api_server advertises audio_api: false and implements no audio routes, so clients get HTTP 404 there."
+author: hermes-audio-api

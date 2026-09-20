@@ -1,0 +1,27 @@
+#!/sbin/openrc-run
+name="Hermes bootstrap"
+description="Prepare the agent config and start the control API and the Hermes agent"
+
+depend() {
+    need networking
+    after networking
+}
+
+start() {
+    ebegin "Starting Hermes guest services"
+    /bootstrap/init_bootstrap.sh
+    eend $?
+}
+
+stop() {
+    ebegin "Stopping Hermes guest services"
+    if [ -f /var/run/hermes-agent.pid ]; then
+        kill "$(cat /var/run/hermes-agent.pid)" 2>/dev/null
+        rm -f /var/run/hermes-agent.pid
+    fi
+    if [ -f /var/run/control-api.pid ]; then
+        kill "$(cat /var/run/control-api.pid)" 2>/dev/null
+        rm -f /var/run/control-api.pid
+    fi
+    eend $?
+}
