@@ -191,3 +191,59 @@ installed (`nodejs-current` 21.7.2 in the Alpine 3.19 community index) and `ui-t
 source (its `node_modules` are build-time only — the image ships the bundle, not the tree). That
 growth would push the 142 MiB artifact past its current ~150 MB ceiling, so it is a size decision,
 not a mechanical fix. Everything else — SPA, `/api/status`, `/api/ws` — is verified working.
+
+
+## Image v7 + app fixes — user-chosen guest disk, and why an updated app had no dashboard
+
+**User-chosen disk size (default 20 GB, user-selectable like RAM).** The writable overlay is now
+sized by the app (`EngineStore.diskGb`, options 10/20/32/64, `qemu-img create ... <N>G`) and the
+guest grows its ext4 root into it at boot. Two layers had to move together: raising only the
+overlay leaves the filesystem fixed, so the extra space is unusable.
+
+- `image/build_guest_image.sh`: guest package list gains `e2fsprogs e2fsprogs-extra` (resize2fs is
+  in e2fsprogs-extra; verified in Alpine's v3.19 main/aarch64 index), and `DISK_SIZE` default is
+  now 6G so the base filesystem alone already offers more than 5 GB.
+- `image/guest/init_bootstrap.sh`: `grow_rootfs()` runs before the services — `resize2fs /dev/vda`
+  (online grow), then prints `[ready] root filesystem <MB>, <MB free>` and warns below 5 GB.
+  Guarded and never fatal.
+- App: `EngineStore.diskGb` + a "Disk" dropdown in the engine screen; `VmManager.growUserImage()`
+  resizes in place via `qemu-img resize` when the setting grew, and deliberately never shrinks
+  (that would mean rebuilding the overlay and discarding the guest).
+- Evidence, host QEMU boot of image v7 (work: /root/hermes-android-linux-build/disk_growth_test.py,
+  log `disk-growth-test.log`): 10 GB overlay -> `[ready] root filesystem 9989 MB, 9575 MB free`;
+  `qemu-img resize` to 20 GB -> `virtual size: 20 GiB` with only **24 MiB** actually used (sparse);
+  rebooting that same overlay -> `df -m /` = `20062 MB total, 19644 MB free`; a canary file written
+  before the grow still hashes identically afterwards; the dashboard still answers HTTP 200 with the
+  session-token marker. `RESULT: ALL CHECKS PASSED`.
+
+**"The dashboard doesn't start" after updating from 1.0.0 — root cause and fix.** The app re-extracts
+the guest disk only when `filesDir/assets_extracted.$ASSET_VERSION` is missing, and `ASSET_VERSION`
+stayed `"1"` while the image changed from the 0.19.0/api_server design to the 0.21.3/dashboard+relay
+design. An updated app therefore kept booting the **old** guest disk, which has no relay on 9129,
+while the new UI expects the dashboard there.
+
+- Reproduced on the host with the 1.0.0 APK's guest disk
+  (`/root/hermes-android-linux-build/old_guest_repro.py`, log `oldguest-repro.log`): the guest reports
+  `[ready] control-api`, `[ready] agent`, `Hermes Agent v0.19.0 (2026.7.20)` and `/bootstrap` still
+  holds `start_agent.sh`, while `GET /?locale=en` and `/api/status` through the relay both fail with
+  `ConnectionResetError(104, 'Connection reset by peer')`. The engine screen looks alive; there is no
+  interface. Exactly the reported symptom.
+- Fix: `ASSET_VERSION` `"1"` -> `"2"`, so an installed app takes the image it ships with. The old
+  guest disk is no longer deleted — it is set aside as `vm/user.qcow2.previous` (only the newest is
+  kept). It is not bootable by itself, because its backing file is the base image that gets replaced;
+  recovering it means pairing it with the base image of its own release (unzip `assets/vm/base.qcow2`
+  from that release's APK and rename the file back to `user.qcow2`).
+- Also fixed while in there: the device-side budgets were tuned for a build host (control API 180s,
+  agent 300s, dashboard 300s). A phone runs the guest several times slower — on this host the guest
+  reports bootstrap complete after 216s — so the app could report failure while the guest was still
+  coming up. Now 600s / 600s / 900s.
+
+**Artefacts of this pass** (not committed and not published):
+guest image `app/src/main/assets/vm/base.qcow2.gz` 143 MB, sha256
+`650c9140ab451cc7f2312a7541d7ec7a4c878057932e5ac4b53b7627d35ef97b`, guest
+`Hermes Agent v0.21.3 (2026.9.14)`, base filesystem 6 GiB with resize2fs present; APK
+`app/build/outputs/apk/debug/app-debug.apk` 202,885,388 bytes, sha256
+`f24ed8f7c90ab220f67502772612d6587f3827a08be1dda19830601ef9618ce1`, `versionCode 2`
+`versionName 1.0.1` (unchanged, per the standing rule), carrying the v7 image (its
+`assets/vm/base.qcow2` unpacked sha256 matches the asset) and the fixes above verified in the dex
+(`assets_extracted.2`) and resources (the Disk strings).

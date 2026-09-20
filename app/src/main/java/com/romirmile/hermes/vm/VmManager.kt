@@ -52,11 +52,24 @@ class VmManager(private val context: Context) {
         // A persistent overlay keeps everything installed inside the guest across restarts. It is
         // recreated only when the base image itself changed, because it is then incompatible.
         if (fresh || !userImage.exists()) {
-            report("Creating the writable guest overlay")
+            if (userImage.exists()) {
+                // Set the old guest aside instead of deleting it: it is the user's data. It is not
+                // bootable on its own (its backing file is the base image, which is replaced right
+                // after this), so recovery means pairing it with the base image of the same release:
+                // unzip assets/vm/base.qcow2 from that release's APK and rename this file back to
+                // user.qcow2. Only the most recent previous disk is kept.
+                val previous = File(vmDir, "user.qcow2.previous")
+                if (previous.exists()) previous.delete()
+                if (userImage.renameTo(previous)) {
+                    report("Kept the previous guest disk as ${previous.name}")
+                }
+            }
+            report("Creating the writable guest disk (${store.diskGb} GB)")
             userImage.delete()
-            createUserImage(userImage.absolutePath, baseImage.absolutePath)
+            createUserImage(userImage.absolutePath, baseImage.absolutePath, store.diskGb)
         } else {
-            report("Reusing the existing guest overlay")
+            report("Reusing the existing guest disk")
+            growUserImage(userImage, store.diskGb)
         }
 
         val command = buildQemuCommand(
@@ -187,23 +200,61 @@ class VmManager(private val context: Context) {
         }
     }
 
-    private fun createUserImage(userImagePath: String, baseImagePath: String) {
+    private fun createUserImage(userImagePath: String, baseImagePath: String, diskGb: Int) {
+        runQemuImg(
+            listOf(
+                "create", "-f", "qcow2",
+                "-b", baseImagePath, "-F", "qcow2",
+                userImagePath, "${diskGb}G"
+            )
+        )
+    }
+
+    /**
+     * Grows an existing guest disk to the size the user picked. `qemu-img resize` extends the qcow2
+     * in place, so everything already inside the guest survives, and the guest's boot script then
+     * grows its filesystem into the new space. Shrinking is deliberately never attempted: a smaller
+     * qcow2 cannot be produced without rebuilding the overlay, which would throw the guest away.
+     */
+    private fun growUserImage(userImage: File, diskGb: Int) {
+        val current = userImageVirtualSize(userImage)
+        val requested = diskGb.toLong() * 1024 * 1024 * 1024
+        if (current <= 0L) {
+            Log.w(TAG, "could not read the guest disk size; leaving it alone")
+            return
+        }
+        when {
+            requested > current -> {
+                report("Growing the guest disk to ${diskGb} GB")
+                runQemuImg(listOf("resize", userImage.absolutePath, "${diskGb}G"))
+            }
+            requested < current ->
+                report("Guest disk stays at ${current / (1L shl 30)} GB (shrinking it would erase the guest)")
+        }
+    }
+
+    /** Virtual (guest-visible) size of the overlay in bytes, or 0 when qemu-img cannot tell us. */
+    private fun userImageVirtualSize(userImage: File): Long = try {
+        val text = runQemuImg(listOf("info", "--output=json", userImage.absolutePath))
+        org.json.JSONObject(text.substring(text.indexOf('{'))).optLong("virtual-size", 0L)
+    } catch (e: Exception) {
+        Log.w(TAG, "qemu-img info failed", e)
+        0L
+    }
+
+    /** Runs the packaged qemu-img and returns its stdout; throws when it exits non-zero. */
+    private fun runQemuImg(arguments: List<String>): String {
         val qemuImg = File(nativeLibDir, "libqemu_img.so")
         check(qemuImg.exists()) { "libqemu_img.so is missing from ${nativeLibDir.absolutePath}" }
 
-        val process = ProcessBuilder(
-            qemuImg.absolutePath, "create", "-f", "qcow2",
-            "-b", baseImagePath, "-F", "qcow2",
-            userImagePath, OVERLAY_SIZE
-        ).apply {
+        val process = ProcessBuilder(listOf(qemuImg.absolutePath) + arguments).apply {
             environment()["LD_LIBRARY_PATH"] = nativeLibDir.absolutePath
         }.start()
-
+        val output = process.inputStream.bufferedReader().readText()
+        val errors = process.errorStream.bufferedReader().readText()
         val exit = process.waitFor()
-        if (exit != 0) {
-            val error = process.errorStream.bufferedReader().readText()
-            error("qemu-img create failed (exit $exit): $error")
-        }
+        if (exit != 0) error("qemu-img ${arguments.first()} failed (exit $exit): $errors")
+        return output
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -266,9 +317,15 @@ class VmManager(private val context: Context) {
 
     companion object {
         private const val TAG = "VmManager"
-        private const val OVERLAY_SIZE = "8G"
 
-        /** Bump whenever the guest image in assets changes, so installed apps re-extract it. */
-        private const val ASSET_VERSION = "1"
+        /**
+         * Bump whenever the guest image in assets changes, so installed apps re-extract it.
+         *
+         * 1 -> 2: the guest's service surface changed with the dashboard. Images built for 1 keep
+         * running the retired agent API server and have no relay on 9129, while the app's UI now
+         * talks to the dashboard through that relay — an app that never re-extracts shows a guest
+         * that looks alive on the engine screen and has no interface at all.
+         */
+        private const val ASSET_VERSION = "2"
     }
 }

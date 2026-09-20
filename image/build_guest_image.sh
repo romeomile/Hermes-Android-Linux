@@ -38,9 +38,11 @@ MINIROOTFS_SHA256="7ef5eef3a5b1d198dfb1610cde1ef5b0755ff5d838fb1e5e1b9f42b592148
 # agent's terminal tool expects, plus TLS certificates and timezone data.
 # py3-setuptools + py3-wheel are required because the Hermes source is installed
 # with --no-build-isolation (its PEP 517 backend is setuptools).
+# e2fsprogs-extra is what ships resize2fs: the guest grows its root filesystem into the
+# writable disk the app attaches, which is how the user-chosen disk size becomes usable.
 PACKAGES="alpine-base openrc bash busybox-extras curl git ripgrep nano less procps \
 coreutils findutils grep sed tar gzip xz bzip2 tzdata ca-certificates python3 py3-pip \
-py3-setuptools py3-wheel"
+py3-setuptools py3-wheel e2fsprogs e2fsprogs-extra"
 
 # The upstream release the mobile shell targets (internal version 0.21.3).
 HERMES_TAG="${HERMES_TAG:-v2026.9.14}"
@@ -49,7 +51,11 @@ HERMES_SRC="$WORK_DIR/hermes-src"
 WHEELS="$WORK_DIR/wheels"
 SPA_OUT="$HERMES_SRC/hermes_cli/web_dist"
 
-DISK_SIZE="${DISK_SIZE:-2G}"
+# The base filesystem is sized so an image on its own already offers more than 5 GB of usable
+# space; the app then attaches a larger writable overlay (20 GB by default) and the guest grows
+# this filesystem into it at boot, which is where the user-chosen size lands. A bigger base costs
+# nothing on disk: the qcow2 only stores the ~400 MB of files that are actually written.
+DISK_SIZE="${DISK_SIZE:-6G}"
 
 say() { printf '\n=== %s ===\n' "$1"; }
 

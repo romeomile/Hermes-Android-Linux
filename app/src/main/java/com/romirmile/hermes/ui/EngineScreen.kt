@@ -87,6 +87,7 @@ fun EngineScreen(
 
     var cpu by remember { mutableStateOf(store.cpuCount) }
     var ram by remember { mutableStateOf(store.ramMb) }
+    var disk by remember { mutableStateOf(store.diskGb) }
     var autoStart by remember { mutableStateOf(store.autoStart) }
     var showKey by remember { mutableStateOf(false) }
     var provider by remember {
@@ -171,6 +172,19 @@ fun EngineScreen(
                     selected = ram,
                     optionLabel = { "${it / 1024} GB" },
                     onSelect = { ram = it; store.ramMb = it }
+                )
+                EngineDropdown(
+                    label = stringResource(R.string.engine_disk),
+                    options = EngineStore.DISK_CHOICES,
+                    selected = disk,
+                    optionLabel = { "$it GB" },
+                    onSelect = { disk = it; store.diskGb = it }
+                )
+                Text(
+                    stringResource(R.string.engine_disk_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp)
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(

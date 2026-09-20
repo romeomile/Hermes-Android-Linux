@@ -34,6 +34,8 @@
     <string name="engine_device_title">Device resources</string>
     <string name="engine_cpu">CPU cores</string>
     <string name="engine_ram">Memory</string>
+    <string name="engine_disk">Disk</string>
+    <string name="engine_disk_hint">Space reserved for the Linux environment. It is taken from the phone only as the agent writes, so a large disk costs nothing until it is used, and the space grows with the setting.</string>
     <string name="engine_autostart">Start with the app</string>
     <string name="engine_agent_setup_title">Agent model</string>
     <string name="engine_provider">Provider</string>

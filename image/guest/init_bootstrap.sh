@@ -100,6 +100,35 @@ wait_port() {  # wait_port <port> <label> <logfile> <seconds>
     return 1
 }
 
+# Grow the root filesystem into the disk the app attached. The app creates the writable overlay at
+# a size the user chooses (20 GB by default) and QEMU presents it as /dev/vda; the filesystem
+# inside is a fixed-size ext4, so this call is what turns the extra disk into usable space. An ext4
+# grow works online (the root is mounted read-write here) and is a no-op once the filesystem fills
+# the disk. resize2fs comes from Alpine's e2fsprogs-extra. Nothing here is fatal: if the tool is
+# missing or the resize fails, the guest keeps the filesystem its base image shipped with, which is
+# already larger than the 5 GB the app promises.
+grow_rootfs() {
+    if [ ! -b /dev/vda ]; then
+        echo "WARNING: /dev/vda not found, leaving the filesystem as it is"
+        return 0
+    fi
+    if ! command -v resize2fs >/dev/null 2>&1; then
+        echo "WARNING: resize2fs is missing, leaving the filesystem as it is"
+        return 0
+    fi
+    resize2fs /dev/vda 2>&1 | tail -2 || true
+    TOTAL_MB=$(df -Pm / 2>/dev/null | awk 'NR==2 {print $2}')
+    FREE_MB=$(df -Pm / 2>/dev/null | awk 'NR==2 {print $4}')
+    if [ -n "${FREE_MB:-}" ]; then
+        echo "[ready] root filesystem ${TOTAL_MB} MB, ${FREE_MB} MB free"
+        if [ "${FREE_MB:-0}" -lt 5120 ]; then
+            echo "[WARNING] under 5 GB free on /: the attached disk is smaller than the app's default"
+        fi
+    fi
+}
+
+grow_rootfs
+
 echo "starting the control API on 0.0.0.0:$CONTROL_PORT"
 API_TOKEN="$TOKEN" nohup /usr/bin/python3 /bootstrap/api_server.py >>/var/log/control-api.log 2>&1 &
 echo $! > /var/run/control-api.pid

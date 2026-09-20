@@ -23,6 +23,16 @@ class EngineStore(context: Context) {
         get() = prefs.getInt(KEY_RAM, DEFAULT_RAM_MB).coerceIn(512, 4096)
         set(value) = prefs.edit().putInt(KEY_RAM, value.coerceIn(512, 4096)).apply()
 
+    /**
+     * Size of the writable guest disk, in GB. The overlay is a sparse qcow2, so this is a ceiling
+     * rather than a reservation: the phone only gives up what the guest actually writes. The guest
+     * grows its filesystem into this space at boot, which is why the value must never be lowered —
+     * shrinking an overlay means rebuilding it, and that discards everything inside.
+     */
+    var diskGb: Int
+        get() = prefs.getInt(KEY_DISK, DEFAULT_DISK_GB).coerceIn(MIN_DISK_GB, MAX_DISK_GB)
+        set(value) = prefs.edit().putInt(KEY_DISK, value.coerceIn(MIN_DISK_GB, MAX_DISK_GB)).apply()
+
     /** When true the app brings the VM up on launch, so chat is ready without opening this screen. */
     var autoStart: Boolean
         get() = prefs.getBoolean(KEY_AUTOSTART, true)
@@ -45,6 +55,7 @@ class EngineStore(context: Context) {
         private const val PREFS = "hermes_engine"
         private const val KEY_CPU = "cpu_count"
         private const val KEY_RAM = "ram_mb"
+        private const val KEY_DISK = "disk_gb"
         private const val KEY_AUTOSTART = "auto_start"
         private const val KEY_TOKEN = "api_token"
         private const val KEY_PROVIDER = "provider"
@@ -52,6 +63,17 @@ class EngineStore(context: Context) {
 
         const val DEFAULT_CPU = 2
         const val DEFAULT_RAM_MB = 2048
+
+        /**
+         * Disk sizes offered in the engine screen, in GB. 20 GB is the default because the overlay
+         * is sparse — it costs nothing until the agent writes — and the guest's filesystem grows
+         * into it at boot, so the user never has to come back and ask for more room. The smallest
+         * choice still leaves well over 5 GB usable inside Linux.
+         */
+        val DISK_CHOICES = listOf(10, 20, 32, 64)
+        const val DEFAULT_DISK_GB = 20
+        const val MIN_DISK_GB = 10
+        const val MAX_DISK_GB = 128
 
         /** Control API inside the guest (QEMU hostfwd: device 127.0.0.1 -> guest). */
         const val CONTROL_PORT = 7080

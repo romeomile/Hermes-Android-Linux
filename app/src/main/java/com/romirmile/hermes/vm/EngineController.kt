@@ -292,9 +292,17 @@ object EngineController {
     }
 
     private const val LOG_LIMIT = 400
-    private const val CONTROL_TIMEOUT_SECONDS = 180
-    private const val AGENT_TIMEOUT_SECONDS = 300
+
+    /**
+     * Budgets for a phone, not for a build host. The guest runs under QEMU's TCG emulation, and a
+     * phone is several times slower than the machine the image is built on: a boot that reaches the
+     * control API in ~3 minutes there can take 10+ minutes here. A budget that is too tight reports
+     * a failure while the guest is still coming up, which reads to the user as "the dashboard does
+     * not start".
+     */
+    private const val CONTROL_TIMEOUT_SECONDS = 600
+    private const val AGENT_TIMEOUT_SECONDS = 600
 
     /** The dashboard needs its SPA built and served; under emulation that takes a while. */
-    private const val DASHBOARD_TIMEOUT_SECONDS = 300
+    private const val DASHBOARD_TIMEOUT_SECONDS = 900
 }
