@@ -141,7 +141,7 @@ class VmManager(private val context: Context) {
     // ---------------------------------------------------------------------------------------------
 
     private fun assetsReady(): Boolean =
-        File(filesDir, "assets_extracted.$ASSET_VERSION").exists() &&
+        File(filesDir, extractedMarker).exists() &&
             resolveQemuBinary().exists() &&
             File(vmDir, "base.qcow2").exists() &&
             File(vmDir, "vmlinuz-virt").exists() &&
@@ -164,8 +164,8 @@ class VmManager(private val context: Context) {
             if (!target.exists()) extractAsset("vm/$name", target)
         }
 
-        File(filesDir, "assets_extracted.$ASSET_VERSION").createNewFile()
-        report("Guest disk ready")
+        File(filesDir, extractedMarker).createNewFile()
+        report("Guest disk ready (image ${GuestImage.ID})")
     }
 
     private fun extractAsset(assetPath: String, destination: File) {
@@ -319,13 +319,13 @@ class VmManager(private val context: Context) {
         private const val TAG = "VmManager"
 
         /**
-         * Bump whenever the guest image in assets changes, so installed apps re-extract it.
+         * Marker naming the guest disk already extracted into this install's storage.
          *
-         * 1 -> 2: the guest's service surface changed with the dashboard. Images built for 1 keep
-         * running the retired agent API server and have no relay on 9129, while the app's UI now
-         * talks to the dashboard through that relay — an app that never re-extracts shows a guest
-         * that looks alive on the engine screen and has no interface at all.
+         * It is derived from the image the build ships ([GuestImage]), so a new image ALWAYS forces a
+         * re-extract. A hand-maintained counter did not: 1.0.2 and 1.0.3 shipped different images
+         * under the same marker, so an app updated from 1.0.2 kept the old guest indefinitely and the
+         * new image's fixes never reached the device.
          */
-        private const val ASSET_VERSION = "2"
+        private val extractedMarker: String get() = "assets_extracted.${GuestImage.ID}"
     }
 }
