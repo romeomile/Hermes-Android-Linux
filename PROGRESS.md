@@ -85,6 +85,16 @@ Two real defects were found only by that test, and both are fixed:
 Also fixed: `hermes` installs into `/usr/bin` (not `/usr/local/bin`), so the guest scripts resolve
 the launcher instead of assuming a path.
 
+## Release
+
+- **Hermes Linux 1.0.0** — https://github.com/romeomile/Hermes-Android-Linux/releases/tag/v1.0.0
+- Asset: `HermesLinux-1.0.0-debug.apk`, 163,761,884 bytes,
+  sha256 `037d55e713c8e1cd0a6ab3e655c0af5b44de7bb41aa497bd1b05b85dc37c5ad8`
+  (verified by downloading the published asset back and comparing hashes)
+- `versionCode 1`, `versionName 1.0.0`, package `com.romirmile.hermeslinux`, label "Hermes Linux",
+  `arm64-v8a`, debug-signed.
+- Local copy handed over: `/root/hermes-android-linux-dist/HermesLinux-1.0.0-debug.apk`
+
 ## Known limits / follow-ups
 
 - **No KVM on Android**, so the guest is TCG-emulated: expect slow CPU work, normal network work.
