@@ -87,6 +87,16 @@ the launcher instead of assuming a path.
 
 ## Release
 
+- **Hermes Linux 1.0.2** — https://github.com/romeomile/Hermes-Android-Linux/releases/tag/v1.0.2
+- Asset: `HermesLinux-1.0.2-debug.apk`, 202,885,388 bytes,
+  sha256 `675e3c5d5cc7ef87516b970b84d301693a92e2fbbe3a1ab13adb9d00693694a8` (verified by downloading
+  the published asset back: same sha256 as the local build, `aapt2 dump badging` reads
+  `versionCode='3' versionName='1.0.2'`). `versionCode 3`, `versionName 1.0.2`, package
+  `com.romirmile.hermeslinux`, debug-signed. Installs over 1.0.0/1.0.1 as an update.
+- Fixes the reported "the dashboard does not start" after updating from 1.0.0 (guest image marker
+  `1` -> `2`; see the section below) and adds the user-sized guest disk (20 GB default, >5 GB usable).
+- Local copies: `/root/hermes-android-linux-dist/HermesLinux-1.0.2-debug.apk` and
+  `RELEASE_NOTES-1.0.2.md`.
 - **Hermes Linux 1.0.1** — https://github.com/romeomile/Hermes-Android-Linux/releases/tag/v1.0.1
 - Asset: `HermesLinux-1.0.1-debug.apk`, 202,111,488 bytes,
   sha256 `262d3590f03294964073ace7816e0b121c81cb9fb19911e388d54b3d4151307c`
