@@ -102,12 +102,16 @@ say "5/9 Install Hermes Agent inside the guest (musl/aarch64 wheels)"
 # skipped in the guest and done on the host afterwards (bytecode is architecture independent for a
 # given Python minor version), which is another large saving.
 WHEELS="$WORK_DIR/wheels"
-if [ -d "$WHEELS" ] && [ -n "$(ls -A "$WHEELS" 2>/dev/null)" ]; then
+# Reuse the wheelhouse only when it actually contains what we install; a partially populated
+# directory would make the --no-index install fail.
+if [ -d "$WHEELS" ] && ls "$WHEELS"/hermes_agent-*.whl "$WHEELS"/aiohttp-*.whl >/dev/null 2>&1; then
     echo "reusing the cached wheelhouse ($(ls -1 "$WHEELS" | wc -l) files)"
 else
+    rm -rf "$WHEELS"
     mkdir -p "$WHEELS"
-    if python3 -m pip download --dest "$WHEELS" --platform musllinux_1_2_aarch64 \
-        --python-version 3.11 --only-binary=:all: hermes-agent >/dev/null 2>&1; then
+    if python3 -m pip download --dest "$WHEELS" \
+        --platform musllinux_1_1_aarch64 --platform musllinux_1_2_aarch64 \
+        --python-version 3.11 --only-binary=:all: hermes-agent aiohttp >/dev/null 2>&1; then
         echo "wheelhouse ready ($(ls -1 "$WHEELS" | wc -l) wheels)"
     else
         echo "could not resolve wheels on the host; the guest will resolve them itself"
@@ -118,10 +122,10 @@ fi
 if [ -d "$WHEELS" ]; then
     rm -rf "$ROOTFS/wheels"
     cp -a "$WHEELS" "$ROOTFS/wheels"
-    guest_run /bin/sh -c "python3 -m pip install --break-system-packages --no-index --find-links=/wheels --no-compile hermes-agent"
+    guest_run /bin/sh -c "python3 -m pip install --break-system-packages --no-index --find-links=/wheels --no-compile hermes-agent aiohttp"
     rm -rf "$ROOTFS/wheels"
 else
-    guest_run /bin/sh -c "python3 -m pip install --break-system-packages --no-cache-dir --no-compile hermes-agent"
+    guest_run /bin/sh -c "python3 -m pip install --break-system-packages --no-cache-dir --no-compile hermes-agent aiohttp"
 fi
 
 # Byte-compile on the host: same Python minor version, so the guest can use the result directly.
@@ -195,9 +199,10 @@ if [ -f "$PLUGIN_SRC/plugin.yaml" ]; then
 fi
 guest_run /bin/sh -c '
     export HERMES_HOME=/root/.hermes
-    hermes config set api_server.enabled true || true
-    hermes config set api_server.host 0.0.0.0 || true
-    hermes config set api_server.port 8642 || true
+    # The API server adapter reads platforms.api_server.extra.*, not a top-level api_server block.
+    hermes config set platforms.api_server.enabled true || true
+    hermes config set platforms.api_server.extra.host 0.0.0.0 || true
+    hermes config set platforms.api_server.extra.port 8642 || true
     if [ -d "$HERMES_HOME/plugins/hermes-audio-api" ]; then
         hermes plugins enable hermes-audio-api || true
     fi

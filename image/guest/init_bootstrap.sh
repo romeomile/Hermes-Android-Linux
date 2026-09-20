@@ -44,25 +44,44 @@ if cfg_path.exists():
         print("WARNING: config.yaml unreadable (%s), writing the api_server block only" % exc)
         cfg = {}
 
+# The API server adapter resolves its bind address from platforms.api_server.extra
+# (host/port/key), falling back to the API_SERVER_* environment. Write both, so it binds
+# 0.0.0.0 whatever path the running version prefers: SLIRP delivers forwarded traffic to the
+# guest's eth0, never to its loopback.
+platforms = cfg.get("platforms") if isinstance(cfg.get("platforms"), dict) else {}
+api_platform = platforms.get("api_server") if isinstance(platforms.get("api_server"), dict) else {}
+extra = api_platform.get("extra") if isinstance(api_platform.get("extra"), dict) else {}
+extra.update({"host": "0.0.0.0", "port": 8642, "key": token})
+api_platform["enabled"] = True
+api_platform["extra"] = extra
+platforms["api_server"] = api_platform
+cfg["platforms"] = platforms
+
 api = cfg.get("api_server") if isinstance(cfg.get("api_server"), dict) else {}
 api.update({"enabled": True, "host": "0.0.0.0", "port": 8642})
 cfg["api_server"] = api
 cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
 
 env_path = home / ".env"
+wanted = {
+    "API_SERVER_ENABLED": "true",
+    "API_SERVER_HOST": "0.0.0.0",
+    "API_SERVER_PORT": "8642",
+    "API_SERVER_KEY": token,
+}
 lines = env_path.read_text().splitlines() if env_path.exists() else []
-out, seen = [], False
+out = []
 for line in lines:
-    if line.startswith("API_SERVER_KEY="):
-        out.append("API_SERVER_KEY=%s" % token)
-        seen = True
+    name = line.split("=", 1)[0].strip() if "=" in line else ""
+    if name in wanted:
+        out.append("%s=%s" % (name, wanted.pop(name)))
     else:
         out.append(line)
-if not seen:
-    out.append("API_SERVER_KEY=%s" % token)
+for name, value in wanted.items():
+    out.append("%s=%s" % (name, value))
 env_path.write_text("\n".join(out).strip() + "\n")
 env_path.chmod(0o600)
-print("agent config prepared")
+print("agent config prepared (api_server on 0.0.0.0:8642)")
 PYEOF
 
 echo "starting the control API on 0.0.0.0:7080"
@@ -80,15 +99,25 @@ while [ "$waited" -lt 60 ]; do
     waited=$((waited + 1))
     sleep 1
 done
+if [ "$waited" -ge 60 ]; then
+    echo "[FAILED] control-api did not answer; last log lines:"
+    tail -20 /var/log/control-api.log 2>/dev/null || echo "(no control-api log)"
+fi
 
 waited=0
 while [ "$waited" -lt 240 ]; do
-    if wget -q --header="Authorization: Bearer $TOKEN" -O- http://127.0.0.1:8642/v1/models >/dev/null 2>&1; then
+    # Port-level probe: the agent may have no model configured yet, so readiness must not depend
+    # on an authenticated HTTP endpoint answering with content.
+    if python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1); sys.exit(0 if s.connect_ex(('127.0.0.1',8642))==0 else 1)" 2>/dev/null; then
         echo "[ready] agent"
         break
     fi
     waited=$((waited + 1))
     sleep 1
 done
+if [ "$waited" -ge 240 ]; then
+    echo "[FAILED] agent did not answer on port 8642; last log lines:"
+    tail -30 /var/log/hermes-agent.log 2>/dev/null || echo "(no agent log)"
+fi
 
 echo "=== bootstrap complete ==="

@@ -56,9 +56,34 @@ image/
 - [x] Private repo, base imported, rebranded, chat client integrated
 - [x] Engine layer: VmManager / VmApiClient / VmService / EngineController / EngineScreen
 - [x] Guest side: control API, bootstrap, OpenRC service, image builder
-- [ ] Guest image built (`app/src/main/assets/vm/base.qcow2.gz`) and boot-tested on the host
-- [ ] APK built and delivered to the user for on-device testing
-- [ ] On-device numbers: VM boot time, agent readiness time, first chat turn, battery behaviour
+- [x] Guest image built and **boot-tested on the host** (see evidence below)
+- [x] APK built with the guest image inside
+- [ ] On-device test by the user: VM boot time, agent readiness time, first chat turn, battery
+- [ ] Release signing with a permanent keystore (the delivered APK is debug-signed)
+
+## Host boot test — evidence (`image/test_guest_image.sh`)
+
+Booting the shipped image under `qemu-system-aarch64` on a desktop Linux host:
+
+- guest boots; OpenRC runs the bootstrap; the token arrives on the kernel command line
+- control API answers `/health` **~30 s** after boot (`{"status":"ok","agent":"running"}`)
+- guest listens on `0.0.0.0:7080` (control) and `0.0.0.0:8642` (agent)
+- over the forwarded port the agent answers
+  `GET /v1/models` → `HTTP 200 {"object":"list","data":[{"id":"hermes-agent",...}]}`
+- guest toolchain: Alpine 3.19.1, Python 3.11.14, Hermes Agent v0.19.0, apk-tools 2.14.0, ripgrep 14.0.3
+
+Two real defects were found only by that test, and both are fixed:
+
+1. **The control API never listened** — the module defined the FastAPI app but never called
+   `uvicorn.run`, so the process exited immediately. The bootstrap now also prints the failing
+   component's log to the console instead of appearing to hang.
+2. **The agent's API server bound loopback**, so nothing answered on the forwarded port. The
+   adapter resolves its address from `platforms.api_server.extra.{host,port,key}` (falling back to
+   `API_SERVER_*`), **not** from a top-level `api_server:` block — which is silently accepted but
+   ignored. The guest bootstrap now writes both shapes plus the env vars.
+
+Also fixed: `hermes` installs into `/usr/bin` (not `/usr/local/bin`), so the guest scripts resolve
+the launcher instead of assuming a path.
 
 ## Known limits / follow-ups
 

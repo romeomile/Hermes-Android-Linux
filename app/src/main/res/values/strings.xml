@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Hermes</string>
+    <string name="app_name">Hermes Linux</string>
 
     <!-- Chat screen -->
     <string name="title_new_chat">New chat</string>

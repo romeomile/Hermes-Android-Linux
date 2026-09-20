@@ -254,3 +254,11 @@ async def agent_config(req: AgentConfigRequest) -> dict:
             applied.append("%s (error: %s)" % (key, exc))
 
     return {"ok": True, "env": sorted(wanted), "settings": applied, "restartRequired": True}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # 0.0.0.0 on purpose: SLIRP forwards device traffic to the guest's eth0, not to its loopback.
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("CONTROL_PORT", "7080")),
+                log_level="info")

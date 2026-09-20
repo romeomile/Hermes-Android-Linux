@@ -69,5 +69,12 @@ echo "agent API server (port $AGENT_PORT):"
 curl -s "http://127.0.0.1:$AGENT_PORT/v1/models" -H "Authorization: Bearer $TOKEN" | head -c 400; echo
 
 echo
+echo "inside the guest - what is listening and what does the API server answer:"
+curl -s -X POST "http://127.0.0.1:$CONTROL_PORT/vm/exec" \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d "{\"cmd\":\"netstat -ltn | grep -E '8642|7080'; echo '--- /v1/models ---'; curl -sS -m 10 -o /dev/null -w 'HTTP %{http_code}\\n' -H 'Authorization: Bearer $TOKEN' http://127.0.0.1:8642/v1/models; curl -sS -m 10 -H 'Authorization: Bearer $TOKEN' http://127.0.0.1:8642/v1/models | head -c 300\",\"timeout\":120}" \
+    | head -c 900; echo
+
+echo
 echo "agent log (tail):"
 curl -s "http://127.0.0.1:$CONTROL_PORT/agent/log?lines=25" -H "Authorization: Bearer $TOKEN" | head -c 2000; echo
