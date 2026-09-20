@@ -1,6 +1,6 @@
 #!/sbin/openrc-run
 name="Hermes bootstrap"
-description="Prepare the agent config and start the control API and the Hermes agent"
+description="Prepare the agent config, then start the control API, the dashboard and the relay"
 
 depend() {
     need networking
@@ -15,13 +15,12 @@ start() {
 
 stop() {
     ebegin "Stopping Hermes guest services"
-    if [ -f /var/run/hermes-agent.pid ]; then
-        kill "$(cat /var/run/hermes-agent.pid)" 2>/dev/null
-        rm -f /var/run/hermes-agent.pid
-    fi
-    if [ -f /var/run/control-api.pid ]; then
-        kill "$(cat /var/run/control-api.pid)" 2>/dev/null
-        rm -f /var/run/control-api.pid
-    fi
+    # Stop by pid file, never by process pattern.
+    for pidfile in /var/run/hermes-relay.pid /var/run/hermes-dashboard.pid /var/run/control-api.pid; do
+        if [ -f "$pidfile" ]; then
+            kill "$(cat "$pidfile")" 2>/dev/null
+            rm -f "$pidfile"
+        fi
+    done
     eend $?
 }

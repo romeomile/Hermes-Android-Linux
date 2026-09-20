@@ -2,216 +2,19 @@
 <resources>
     <string name="app_name">Hermes Linux</string>
 
-    <!-- Chat screen -->
-    <string name="title_new_chat">New chat</string>
-    <string name="empty_title">How can I help?</string>
-    <string name="empty_subtitle">Ask anything — Hermes can search, read files, run things and use its skills.</string>
-    <string name="composer_hint">Ask anything</string>
-    <string name="disclaimer">You trusted me, sit tight and let me do my job!</string>
-    <string name="status_thinking">Thinking</string>
-    <string name="status_stopped">Stopped.</string>
-    <string name="status_running">running…</string>
-    <string name="agent_activity">Agent activity</string>
-    <string name="role_hermes">Hermes</string>
-
-    <!-- Content descriptions -->
-    <string name="cd_open_conversations">Open conversations</string>
-    <string name="cd_new_chat">New chat</string>
-    <string name="cd_more">More options</string>
-    <string name="cd_send">Send</string>
-    <string name="cd_stop">Stop generating</string>
-    <string name="cd_voice">Voice conversation</string>
-    <string name="cd_attach">Attach</string>
     <string name="cd_back">Back</string>
-    <string name="cd_chat_options">Chat options</string>
-    <string name="cd_copy">Copy</string>
-    <string name="cd_regenerate">Regenerate</string>
-    <string name="cd_share">Share</string>
-    <string name="cd_remove_attachment">Remove attachment</string>
-    <string name="cd_clear_search">Clear search</string>
 
-    <!-- Menu / drawer -->
-    <string name="menu_rename_chat">Rename</string>
-    <string name="menu_delete_chat">Delete</string>
-    <string name="menu_settings">Settings</string>
-    <string name="menu_copy_chat">Copy chat</string>
-    <string name="menu_share_chat">Share chat</string>
-    <string name="drawer_title">Hermes</string>
-    <string name="drawer_chats">Chats</string>
-    <string name="drawer_new_chat">New chat</string>
-    <string name="drawer_search_hint">Search chats</string>
-    <string name="drawer_search_empty">No chats match “%1$s”.</string>
-    <string name="drawer_settings">Settings</string>
-    <string name="drawer_tasks">Tasks</string>
-    <string name="drawer_skills">Skills</string>
-    <string name="drawer_models">Models &amp; providers</string>
-
-    <!-- Message actions -->
-    <string name="action_copy">Copy</string>
-    <string name="action_regenerate">Regenerate</string>
-    <string name="action_share">Share</string>
-    <string name="copied_to_clipboard">Copied to clipboard</string>
-    <string name="share_chat_title">Share chat</string>
-
-    <!-- Dialogs -->
-    <string name="rename_dialog_title">Rename chat</string>
-    <string name="rename_field_label">Title</string>
-    <string name="delete_dialog_title">Delete chat?</string>
-    <string name="delete_dialog_message">This chat and its messages will be removed from this device.</string>
-    <string name="action_save">Save</string>
-    <string name="action_cancel">Cancel</string>
-    <string name="action_delete">Delete</string>
-
-    <!-- Errors / notices -->
-    <string name="error_no_endpoint">No gateway endpoint is set. Open Settings and enter your Hermes API server URL.</string>
-    <string name="error_connection_lost">Connection lost — the network changed while Hermes was answering. Tap Regenerate to try again.</string>
-    <string name="error_timeout">The gateway didn’t respond in time. Tap Regenerate to try again.</string>
-    <string name="error_host_unreachable">Can’t reach the gateway. Check the URL in Settings and your network.</string>
-    <string name="error_offline">You’re offline. Connect to a network and send again.</string>
-    <string name="notice_reconnecting">Connection lost — reconnecting…</string>
-    <string name="error_send_failed">Couldn’t send this message. Please try again.</string>
-    <string name="voice_title">Voice</string>
-    <string name="voice_listening">Listening…</string>
-    <string name="voice_thinking">Thinking…</string>
-    <string name="voice_speaking">Speaking…</string>
-    <string name="voice_tap_to_talk">Tap to speak</string>
-    <string name="voice_muted">Microphone muted</string>
-    <string name="voice_error">Speech recognition is unavailable on this device.</string>
-    <string name="voice_mute">Mute microphone</string>
-    <string name="voice_unmute">Unmute microphone</string>
-    <string name="voice_end">End voice session</string>
-    <string name="voice_no_permission">Microphone permission is needed for voice conversations.</string>
-    <string name="voice_session_active">Voice session active</string>
-    <string name="voice_return">Return to call</string>
-    <string name="voice_end_session">End session</string>
-    <string name="notice_image_failed">Couldn’t read that image.</string>
-    <string name="notice_image_too_big">That image is too large to attach.</string>
-    <string name="notice_no_api_key">No API key set — add one in Settings if your gateway requires it.</string>
-
-    <!-- Attachments -->
-    <string name="attach_add_photo">Add photos</string>
-    <string name="attach_limit_reached">One image per message for now.</string>
-
-    <!-- Settings -->
-    <string name="settings_title">Settings</string>
-    <string name="settings_section_connection">Connection</string>
-    <string name="settings_endpoint_label">Gateway base URL</string>
-    <string name="settings_endpoint_support">The /v1 path is added automatically — paste the base URL of your gateway, e.g. https://agent.example.com:8642</string>
-    <string name="settings_key_label">API key</string>
-    <string name="settings_show_key">Show key</string>
-    <string name="settings_hide_key">Hide key</string>
-    <string name="settings_model_label">Model</string>
-    <string name="settings_model_support">Model alias on your Hermes agent. Leave as it is unless you need a specific one — Fetch models lists what the agent offers.</string>
-    <string name="settings_fetch_models">Fetch models</string>
-    <string name="settings_test_connection">Test connection</string>
-    <string name="settings_save_connection">Save connection</string>
-    <string name="settings_section_appearance">Appearance</string>
-    <string name="settings_theme_label">Theme</string>
-    <string name="theme_system">System default</string>
-    <string name="theme_light">Light</string>
-    <string name="theme_dark">Dark</string>
-    <string name="settings_section_speech">Speech</string>
-    <string name="settings_speech_engine_label">Voice engine</string>
-    <string name="speech_engine_phone">Phone voice</string>
-    <string name="speech_engine_agent">Agent voice (Hermes)</string>
-    <string name="settings_speech_engine_support">Agent voice uses the speech setup on the Hermes agent you connect to — its provider, voice and API key. Nothing speech-related is stored in this app.</string>
-    <string name="settings_voice_check">Check agent voice</string>
-    <string name="settings_speech_model_label">Speech model</string>
-    <string name="settings_speech_model_support">Free models are marked. Leave blank to use the agent\'s own model.</string>
-    <string name="settings_speech_voice_label">Voice</string>
-    <string name="settings_speech_voice_support">Leave blank to use the model\'s default voice.</string>
-    <string name="voice_status_checking">Checking the agent\'s speech setup…</string>
-    <string name="voice_status_none">No voice endpoint on this agent (%1$s) — the phone voice will be used.</string>
-    <string name="voice_status_direct_openrouter">Agent speech: direct via OpenRouter — pick a model below.</string>
-    <string name="voice_status_direct">Agent speech: direct via %1$s.</string>
-    <string name="voice_status_relay">Agent speech: relay — the agent speaks with its own voice.</string>
-    <string name="speech_free_badge">Free</string>
-    <string name="voice_agent_unavailable">This agent has no voice endpoint — using the phone voice.</string>
-    <string name="speech_engine_own">Own voice (your provider)</string>
-    <string name="settings_own_speech_support">Speaks with a speech provider you set up here — any OpenAI-compatible audio endpoint (for example an OpenRouter key with a free speech model). The key is stored on this device only, and the agent needs no changes.</string>
-    <string name="settings_own_speech_url_label">Speech endpoint</string>
-    <string name="settings_own_speech_url_support">Base URL, e.g. https://openrouter.ai/api/v1 — /audio/speech is added automatically.</string>
-    <string name="settings_own_speech_key_label">Speech API key</string>
-    <string name="settings_own_speech_model_label">Speech model</string>
-    <string name="settings_own_speech_model_support">Defaults to tts-1 when left blank.</string>
-    <string name="settings_own_speech_voice_label">Voice</string>
-    <string name="settings_own_speech_voice_support">Leave blank to use the model\'s default voice.</string>
-    <string name="voice_own_unavailable">Your speech provider did not answer — using the phone voice.</string>
-    <string name="settings_phone_voice_label">Phone voice</string>
-    <string name="settings_phone_voice_system">System default (phone settings)</string>
-    <string name="settings_phone_voice_support">Pick the voice the phone engine speaks with. System default follows the text-to-speech settings on your phone; the voices listed here are the ones this device actually reports.</string>
-    <string name="settings_phone_voice_none">The engine has not reported its voices yet — tap Refresh.</string>
-    <string name="settings_phone_voice_refresh">Refresh</string>
-    <string name="settings_phone_voice_test">Test</string>
-    <string name="settings_phone_voice_test_line">This is the voice you selected.</string>
-    <string name="settings_agent_setup_support">This agent\'s gateway serves no speech endpoints. It can install them on itself — nothing to download, unzip or copy by hand.</string>
-    <string name="settings_agent_setup_button">Set up agent voice on this agent</string>
-    <string name="settings_agent_setup_running">Asking the agent to install its speech endpoints…</string>
-    <string name="settings_agent_setup_restart">Last step — on the agent\'s host, restart the gateway, then tap Check agent voice:</string>
-    <string name="settings_agent_setup_copy">Copy</string>
-    <string name="settings_agent_setup_copied">Command copied</string>
-    <string name="agent_setup_unavailable">This app build carries no setup payload.</string>
-    <string name="agent_setup_no_reply">The agent did not answer. Open that session on the agent to see what it did.</string>
-    <string name="settings_section_about">About</string>
-    <string name="settings_about_text">Chat client for your Hermes agent. Conversations stay on this device.</string>
-    <string name="settings_version">Version %1$s</string>
-    <string name="settings_need_endpoint">Enter a gateway URL first.</string>
-    <string name="settings_testing">Checking the gateway…</string>
-    <string name="settings_test_ok">Connected to Hermes %1$s</string>
-    <string name="settings_test_ok_gateway">Connected — the gateway offers %1$d model(s).</string>
-    <string name="settings_test_fail">Failed: %1$s</string>
-    <string name="settings_fetching">Fetching models…</string>
-    <string name="settings_models_found">%1$d model(s) available</string>
-    <string name="settings_no_models">The gateway returned no models.</string>
-    <string name="settings_saved">Connection saved.</string>
-
-    <!-- Admin pages: shared bits -->
-    <string name="cd_refresh">Refresh</string>
-    <string name="admin_unavailable">This agent did not answer.</string>
-
-    <!-- Scheduled tasks (GET /api/jobs) -->
-    <string name="tasks_title">Scheduled tasks</string>
-    <string name="tasks_loading">Loading tasks…</string>
-    <string name="tasks_empty">No scheduled jobs on this agent.</string>
-    <string name="tasks_state">State: %1$s</string>
-    <string name="tasks_schedule">Schedule: %1$s</string>
-    <string name="tasks_next">Next run: %1$s</string>
-    <string name="tasks_last">Last run: %1$s (%2$s)</string>
-    <string name="tasks_run">Run now</string>
-    <string name="tasks_pause">Pause</string>
-    <string name="tasks_resume">Resume</string>
-    <string name="tasks_delete_title">Delete this job?</string>
-    <string name="tasks_running_named">Running the job…</string>
-    <string name="tasks_pausing_named">Pausing…</string>
-    <string name="tasks_resuming_named">Resuming…</string>
-    <string name="tasks_deleting_named">Deleting…</string>
-
-    <!-- Skills (GET /v1/skills) -->
-    <string name="skills_title">Skills</string>
-    <string name="skills_search_hint">Search skills</string>
-    <string name="skills_count">%1$d skill(s)</string>
-    <string name="skills_empty">No skills reported by this agent.</string>
-
-    <!-- Models (GET /v1/models) -->
-    <string name="models_title">Models &amp; providers</string>
-    <string name="models_current">Current model: %1$s</string>
-    <string name="models_empty">The agent reported no models.</string>
-    <string name="models_in_use">In use</string>
-
-    <!-- Reply-ready notification -->
-    <string name="notification_channel_name">Replies</string>
-    <string name="notification_channel_description">Tells you when Hermes has finished answering.</string>
-
-    <!-- Engine: the local Linux VM that hosts the agent -->
+    <!-- Engine: the local Linux VM that hosts the Hermes dashboard -->
     <string name="engine_title">Engine</string>
     <string name="engine_section_status">Engine status</string>
     <string name="engine_vm">Virtual machine</string>
     <string name="engine_control">Control API</string>
+    <string name="engine_dashboard">Dashboard</string>
     <string name="engine_agent">Agent</string>
     <string name="engine_version">Agent version</string>
     <string name="engine_start">Start engine</string>
     <string name="engine_stop">Stop engine</string>
-    <string name="engine_restart_agent">Restart agent</string>
+    <string name="engine_restart_agent">Restart dashboard</string>
     <string name="engine_refresh">Refresh</string>
     <string name="engine_running">Running</string>
     <string name="engine_starting">Starting…</string>
@@ -219,15 +22,15 @@
     <string name="engine_ready">Ready</string>
     <string name="engine_failed">Failed</string>
     <string name="engine_unknown">Not ready</string>
-    <string name="engine_gateway_title">Gateway for chat apps</string>
-    <string name="engine_gateway_hint">Point a chat app on this device at this address, with the key below.</string>
+    <string name="engine_gateway_title">Hermes dashboard</string>
+    <string name="engine_gateway_hint">The interface is served by the Linux VM and reached on this address through the app\'s own bridge, so the page never talks to it cross-origin.</string>
     <string name="engine_endpoint">Address</string>
-    <string name="engine_key">Key</string>
+    <string name="engine_key">Control key</string>
     <string name="engine_show">Show</string>
     <string name="engine_hide">Hide</string>
     <string name="engine_copy_key">Copy key</string>
     <string name="engine_copied">Copied</string>
-    <string name="engine_use_engine">Use this engine</string>
+    <string name="engine_open_interface">Open the interface</string>
     <string name="engine_device_title">Device resources</string>
     <string name="engine_cpu">CPU cores</string>
     <string name="engine_ram">Memory</string>
@@ -244,9 +47,13 @@
     <string name="engine_log_title">Log</string>
     <string name="engine_copy_log">Copy log</string>
     <string name="engine_log_empty">Nothing logged yet.</string>
-    <string name="drawer_engine">Engine</string>
     <string name="engine_notification_title">Hermes Linux engine</string>
     <string name="engine_notification_text">The Linux VM is running</string>
     <string name="engine_notification_channel">Engine</string>
     <string name="engine_notification_channel_desc">Shown while the Linux VM is running.</string>
+
+    <!-- The WebView that hosts the mobile shell -->
+    <string name="webview_loading">Loading the Hermes interface…</string>
+    <string name="webview_retrying">The dashboard is not answering yet — retrying (%1$d)…</string>
+    <string name="webview_error">%1$s</string>
 </resources>

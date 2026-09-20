@@ -6,7 +6,9 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import com.romirmile.hermes.data.ThemeMode
+
+/** Which colour scheme the Compose screens use. The engine screen follows the system by default. */
+enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 private val Accent = Color(0xFF6E56CF)
 

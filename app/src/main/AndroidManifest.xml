@@ -10,10 +10,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Voice conversations use the on-device speech recognizer (Android 11+ package visibility). -->
+    <!-- Voice: the on-device speech recognizer (Android 11+ package visibility) and the TTS engine
+         the bridge speaks through. -->
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
     </queries>
 

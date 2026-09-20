@@ -12,8 +12,8 @@ android {
         applicationId = "com.romirmile.hermeslinux"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
         ndk { abiFilters += "arm64-v8a" }
     }
 
@@ -52,6 +52,10 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.core:core-splashscreen:1.0.1")
+
+    // The interface is a WebView running the vendored shell; WebViewAssetLoader serves those assets
+    // from an https origin instead of file://, which the shell needs for DOM storage.
+    implementation("androidx.webkit:webkit:1.12.1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 

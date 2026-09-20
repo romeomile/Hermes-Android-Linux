@@ -114,3 +114,69 @@ the launcher instead of assuming a path.
 
 `local.properties` (gitignored) needs `sdk.dir=<android-sdk>`; toolchain pinned to AGP 8.7.3,
 Kotlin 2.0.21, compose-bom 2024.12.01, Gradle 8.9, JDK 17.
+
+
+## Image v6 — the dashboard in the guest (Hermes v2026.9.14 / 0.21.3)
+
+The agent's OpenAI-compatible `api_server` on `0.0.0.0:8642` is **gone**
+(`image/guest/start_agent.sh` deleted). The app's UI surface is now the guest's own **Hermes
+dashboard**, reached through a stdlib TCP relay:
+
+- `127.0.0.1:9128` — `hermes dashboard --host 127.0.0.1 --port 9128 --no-open --skip-build`
+  (`image/guest/start_dashboard.sh`, log `/var/log/hermes-dashboard.log`, pidfile
+  `/var/run/hermes-dashboard.pid`). Loopback-only on purpose: a public bind redirects `/` to `/login`.
+- `0.0.0.0:9129` — `image/guest/relay.py`, a stdlib byte pipe to `127.0.0.1:9128`; WebSocket
+  upgrades pass through untouched. This is the port the app forwards
+  (`EngineStore.DASHBOARD_PORT = 9129`, `VmManager` hostfwd).
+- `0.0.0.0:7080` — unchanged control API (`image/guest/api_server.py`; its "agent" endpoints now
+  describe the dashboard).
+- The device token doubles as the dashboard's session token (`HERMES_DASHBOARD_SESSION_TOKEN`), so
+  `/` carries `__HERMES_SESSION_TOKEN__="<device token>"` — the token the app already holds.
+
+Built from upstream source rather than a PyPI wheel:
+
+- `HERMES_TAG=v2026.9.14` (internal 0.21.3) shallow-cloned into `$WORK_DIR/hermes-src`;
+- the SPA is built **on the host** (`web/`: `npm install && npm run build` -> `hermes_cli/web_dist`);
+- runtime wheels resolved on the host for `musllinux_1_1_aarch64` + `musllinux_1_2_aarch64`, py3.11;
+- in the guest the tag's own build backend is installed first (`setuptools==83.0.0`, `wheel`):
+  Alpine 3.19's setuptools 70.3.0 cannot parse the 0.21.3 PEP 639 `license`/`license-files`
+  metadata and pip dies with `metadata-generation-failed`;
+- then `HERMES_NIX_BUILD=1 pip install --no-index --find-links=/wheels --no-build-isolation
+  --no-compile /hermes-src` — `setup.py` refuses a wheel build outside Nix without that env var;
+- the wheel ships no bundled assets, so `skills/`, `optional-skills/`, `optional-mcps/`, `locales/`
+  and the built `web_dist` are copied into the installed package root
+  (`/usr/lib/python3.11/site-packages`), where the runtime defaults look.
+
+Verified by booting the packed image under host QEMU (`image/test_guest_image.sh`, exit 0):
+
+- `Hermes Agent v0.21.3 (2026.9.14)`, Alpine 3.19.1, Python 3.11.14, launcher `/usr/bin/hermes`;
+- bootstrap readiness: control-api 11s, dashboard 34s, relay 0s; `netstat`: `127.0.0.1:9128`,
+  `0.0.0.0:9129`, `0.0.0.0:7080`;
+- `GET /` through the relay -> `HTTP 200` with `__HERMES_SESSION_TOKEN__="<token>"` and
+  `__HERMES_AUTH_REQUIRED__=false`; also `HTTP 200` with the app's `Host: 127.0.0.1:9129`;
+- `/api/status` -> `HTTP 200`, valid JSON, `"version":"0.21.3"`;
+- raw WebSocket handshake `GET /api/ws?token=...` -> `HTTP/1.1 101 Switching Protocols`;
+- in the guest: `connect_ex 10.0.2.15:9128 -> 111` (refused, loopback-only),
+  `connect_ex 127.0.0.1:9128 -> 0`, `connect_ex 10.0.2.15:9129 -> 0`.
+
+Asset: `app/src/main/assets/vm/base.qcow2.gz` — 148,860,393 bytes (~142 MiB),
+sha256 `b2b091b64df5a311c933fd970d71057c59d6ecf710f61ad6184e7b1b8e56e1b2`; the gunzipped image hashes
+`2ced18a28c8a80a45a46839022512b75fcfd460fc437681bfef9823dc23ce451`, identical to the qcow2 the boot
+test ran against. Build log: `/root/hermes-android-linux-build/bootstrap-image-6.log`.
+
+Chat paths, measured on the booted image (both probed with a raw WebSocket client):
+
+- **`/api/ws` — the JSON-RPC chat path the vendored mobile shell uses — works with no Node.** Upgrade
+  answers `HTTP/1.1 101`, the server pushes `{"jsonrpc": "2.0", "method": "event", "params": {"type":
+  "gateway.ready", ...}}` (skin payload), and `{"jsonrpc":"2.0","id":1,"method":"gateway.ping"}`
+  comes back as `{"jsonrpc": "2.0", "result": {"ok": true}, "id": 1}`.
+- **`/api/pty` — the SPA's own terminal pane — does not.** The upgrade is `101`, then the child
+  prints `Chat unavailable: 1`, and `/var/log/hermes-dashboard.log` shows
+  `Error: the TUI workspace is missing from this Hermes checkout. Expected directory:
+  /usr/lib/python3.11/site-packages/ui-tui` (`command -v node npm` → `rc=127`).
+
+Fixing the terminal pane needs Node plus a built `hermes_cli/tui_dist` bundle: Node is 45.1 MiB
+installed (`nodejs-current` 21.7.2 in the Alpine 3.19 community index) and `ui-tui/` is 4.7 MiB of
+source (its `node_modules` are build-time only — the image ships the bundle, not the tree). That
+growth would push the 142 MiB artifact past its current ~150 MB ceiling, so it is a size decision,
+not a mechanical fix. Everything else — SPA, `/api/status`, `/api/ws` — is verified working.

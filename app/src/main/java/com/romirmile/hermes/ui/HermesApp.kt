@@ -1,5 +1,6 @@
 package com.romirmile.hermes.ui
 
+import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -16,98 +17,62 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
-import com.romirmile.hermes.data.SpeechEngine
-import com.romirmile.hermes.vm.AgentState
 import com.romirmile.hermes.vm.EngineController
-import com.romirmile.hermes.vm.EngineStore
 
-/** Which full-screen surface is on top of the chat. */
-private enum class Screen { CHAT, SETTINGS, VOICE, JOBS, SKILLS, MODELS, ENGINE }
+/** Which surface is on screen: the engine controls or the Hermes interface. */
+private enum class Screen { ENGINE, INTERFACE }
 
+/**
+ * The app has exactly two surfaces.
+ *
+ * 1. The **engine screen** is the entry point: it starts the Linux VM, reports each boot step and
+ *    holds the model setup.
+ * 2. The **interface** is the WebView running the Hermes-mobile shell, which is served from the app's
+ *    assets and backed by the dashboard the VM hosts.
+ *
+ * Once the engine reports the dashboard reachable on `127.0.0.1:9129`, the interface takes over.
+ * System BACK inside the WebView walks its history first and comes back here when there is nothing
+ * left to go back to.
+ */
 @Composable
-fun HermesApp(vm: HermesViewModel) {
-    val settings by vm.settings.collectAsState()
-    var screen by rememberSaveable { mutableStateOf(Screen.CHAT.name) }
+fun HermesApp() {
     val context = LocalContext.current
+    val activity = context as? Activity
     val clipboard = LocalClipboardManager.current
+    var screen by rememberSaveable { mutableStateOf(Screen.ENGINE.name) }
 
     val engineState by EngineController.state.collectAsState()
     val engineLog by EngineController.log.collectAsState()
 
-    fun open(target: Screen) {
-        // Loading on open keeps the pages honest: they show what the agent reports right now.
-        when (target) {
-            Screen.JOBS -> vm.loadJobs()
-            Screen.SKILLS -> vm.loadSkills()
-            Screen.MODELS -> vm.fetchModels(settings.endpoint, settings.apiKey)
-            else -> Unit
-        }
-        screen = target.name
-    }
-
-    // The engine runs the gateway on this device, so a fresh install that has no endpoint of its own
-    // is pointed at it the moment the agent is ready — chat works without any setup.
-    LaunchedEffect(engineState.agent, settings.endpoint) {
-        if (engineState.agent == AgentState.READY && settings.endpoint.isBlank()) {
-            vm.updateSettings {
-                it.copy(
-                    endpoint = EngineStore.localEndpoint(),
-                    apiKey = EngineController.token(context)
-                )
-            }
+    LaunchedEffect(engineState.dashboardReady) {
+        if (engineState.dashboardReady && screen == Screen.ENGINE.name) {
+            screen = Screen.INTERFACE.name
         }
     }
 
-    HermesTheme(settings.theme) {
+    HermesTheme(ThemeMode.SYSTEM) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            ChatScreen(
-                vm = vm,
-                onOpenSettings = { open(Screen.SETTINGS) },
-                onOpenVoice = { screen = Screen.VOICE.name },
-                onOpenJobs = { open(Screen.JOBS) },
-                onOpenSkills = { open(Screen.SKILLS) },
-                onOpenModels = { open(Screen.MODELS) },
-                onOpenEngine = { open(Screen.ENGINE) }
-            )
-            if (screen == Screen.SETTINGS.name) {
-                SettingsScreen(vm = vm, onBack = { screen = Screen.CHAT.name })
-                BackHandler { screen = Screen.CHAT.name }
-            }
-            if (screen == Screen.VOICE.name) {
-                VoiceScreen(vm = vm, onClose = { screen = Screen.CHAT.name })
-                BackHandler { screen = Screen.CHAT.name }
-            }
-            if (screen == Screen.JOBS.name) {
-                JobsScreen(vm = vm, onBack = { screen = Screen.CHAT.name })
-                BackHandler { screen = Screen.CHAT.name }
-            }
-            if (screen == Screen.SKILLS.name) {
-                SkillsScreen(vm = vm, onBack = { screen = Screen.CHAT.name })
-                BackHandler { screen = Screen.CHAT.name }
-            }
-            if (screen == Screen.MODELS.name) {
-                ModelsScreen(vm = vm, onBack = { screen = Screen.CHAT.name })
-                BackHandler { screen = Screen.CHAT.name }
-            }
-            if (screen == Screen.ENGINE.name) {
+            if (screen == Screen.INTERFACE.name) {
+                DashboardWebView(onExit = { screen = Screen.ENGINE.name })
+            } else {
                 EngineScreen(
                     state = engineState,
                     log = engineLog,
                     token = EngineController.token(context),
-                    onBack = { screen = Screen.CHAT.name },
+                    onBack = {
+                        // Ready means the dashboard is serving, so back goes to the interface;
+                        // otherwise there is nothing behind this screen and the app closes.
+                        if (engineState.dashboardReady) {
+                            screen = Screen.INTERFACE.name
+                        } else {
+                            activity?.finish()
+                        }
+                    },
+                    onOpenInterface = { screen = Screen.INTERFACE.name },
                     onStart = { EngineController.start(context) },
                     onStop = { EngineController.stop(context) },
                     onRestartAgent = { EngineController.restartAgent(context) },
                     onRefresh = { EngineController.refresh(context) },
-                    onUseAsGateway = {
-                        vm.updateSettings {
-                            it.copy(
-                                endpoint = EngineStore.localEndpoint(),
-                                apiKey = EngineController.token(context)
-                            )
-                        }
-                        EngineController.logLine("gateway address applied to the app settings")
-                    },
                     onApplyAgent = { provider, model, credentialName, credentialValue ->
                         EngineController.configureAgent(
                             context = context,
@@ -117,7 +82,7 @@ fun HermesApp(vm: HermesViewModel) {
                             credentialValue = credentialValue
                         ) { ok ->
                             EngineController.logLine(
-                                if (ok) "agent restarted with the new model"
+                                if (ok) "the dashboard restarted with the new model"
                                 else "the model change did not take effect"
                             )
                         }
@@ -129,7 +94,7 @@ fun HermesApp(vm: HermesViewModel) {
                         }
                     }
                 )
-                BackHandler { screen = Screen.CHAT.name }
+                BackHandler { activity?.finish() }
             }
         }
     }

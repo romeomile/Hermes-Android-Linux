@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tag key the WebView host uses to carry the current system-bar insets into JS. -->
+    <item name="hermes_insets_tag" type="id" />
+</resources>

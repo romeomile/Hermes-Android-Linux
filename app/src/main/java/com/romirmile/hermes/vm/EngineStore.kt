@@ -56,11 +56,19 @@ class EngineStore(context: Context) {
         /** Control API inside the guest (QEMU hostfwd: device 127.0.0.1 -> guest). */
         const val CONTROL_PORT = 7080
 
-        /** Hermes API server inside the guest. */
-        const val AGENT_PORT = 8642
+        /**
+         * The Hermes dashboard, reached through the in-guest relay that listens on the guest's
+         * `0.0.0.0:9129`. QEMU forwards the device's `127.0.0.1:9129` to it, so the WebView and the
+         * native dashboard proxy both address loopback on this port — the same port the mobile shell
+         * was built against.
+         *
+         * The dashboard itself stays on the guest's loopback (`127.0.0.1:9128`); binding it to a
+         * non-loopback address would make it serve a login page instead of the app.
+         */
+        const val DASHBOARD_PORT = 9129
 
-        /** Loopback address a chat frontend on this device can reach the agent on. */
-        fun localEndpoint(): String = "http://127.0.0.1:$AGENT_PORT"
+        /** Loopback address of the dashboard as seen from this device. */
+        fun dashboardUrl(): String = "http://127.0.0.1:$DASHBOARD_PORT"
 
         /**
          * Public provider -> credential variable names, so the setup screen can fill the right one

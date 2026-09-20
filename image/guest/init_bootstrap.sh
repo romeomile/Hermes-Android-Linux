@@ -2,10 +2,16 @@
 # Guest bootstrap: runs on every boot (OpenRC, after networking).
 #
 # 1. Reads the device-generated token from the kernel command line.
-# 2. Ensures the agent's config enables the API server on 0.0.0.0:8642, and that
-#    API_SERVER_KEY matches the token so the on-device frontend can reach it.
-# 3. Starts the control API and the Hermes agent gateway.
+# 2. Keeps the agent's config sane (HERMES_HOME=/root/.hermes, .env mode 600) and drops the
+#    obsolete api_server settings older images wrote - that adapter is gone: the agent's
+#    dashboard, reached through a loopback relay, is the app's UI surface now.
+# 3. Starts the control API (0.0.0.0:7080), the dashboard (127.0.0.1:9128) and the relay
+#    (0.0.0.0:9129, the only way in from eth0), then waits for all three.
 set -u
+
+DASHBOARD_PORT=9128
+RELAY_PORT=9129
+CONTROL_PORT=7080
 
 echo "=== Hermes Android Linux guest bootstrap ==="
 
@@ -22,102 +28,100 @@ fi
 export HERMES_HOME=/root/.hermes
 mkdir -p "$HERMES_HOME"
 
-# Keep config.yaml valid: make sure the api_server block is on 0.0.0.0:8642
-# without clobbering anything else in the file, and keep API_SERVER_KEY in step
-# with the device token.
-python3 - "$TOKEN" <<'PYEOF'
+# Config hygiene only. Nothing host- or install-specific is written here: the token lives on
+# the device (kernel cmdline / /bootstrap/token, mode 600) and is handed to the processes that
+# need it. The control API uses it as its bearer token; start_dashboard.sh passes it as
+# HERMES_DASHBOARD_SESSION_TOKEN, which the dashboard honours in place of its random
+# per-start session token, so the app can talk to the dashboard API with the same token.
+[ -f "$HERMES_HOME/config.yaml" ] || printf '{}\n' > "$HERMES_HOME/config.yaml"
+[ -f "$HERMES_HOME/.env" ] || : > "$HERMES_HOME/.env"
+chmod 600 "$HERMES_HOME/.env"
+
+# Drop the api_server settings earlier images wrote (platforms.api_server.*, api_server.* in
+# config.yaml and API_SERVER_* in .env). The api_server adapter is no longer started - the
+# dashboard supersedes it for the app UI - so leaving those keys behind would only describe a
+# service that never runs. Merge-only: every other key is preserved, and a failure here never
+# blocks boot.
+python3 - "$HERMES_HOME" <<'PYEOF' || true
 import sys
 from pathlib import Path
 
-import yaml
-
-token = sys.argv[1]
-home = Path("/root/.hermes")
-home.mkdir(parents=True, exist_ok=True)
-
+home = Path(sys.argv[1])
 cfg_path = home / "config.yaml"
-cfg = {}
 if cfg_path.exists():
     try:
+        import yaml
+
         cfg = yaml.safe_load(cfg_path.read_text()) or {}
+        changed = False
+        if isinstance(cfg.get("api_server"), dict):
+            del cfg["api_server"]
+            changed = True
+        platforms = cfg.get("platforms")
+        if isinstance(platforms, dict) and isinstance(platforms.get("api_server"), dict):
+            del platforms["api_server"]
+            changed = True
+            if not platforms:
+                del cfg["platforms"]
+        if changed:
+            cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
+            print("removed obsolete api_server settings from config.yaml")
     except Exception as exc:
-        print("WARNING: config.yaml unreadable (%s), writing the api_server block only" % exc)
-        cfg = {}
-
-# The API server adapter resolves its bind address from platforms.api_server.extra
-# (host/port/key), falling back to the API_SERVER_* environment. Write both, so it binds
-# 0.0.0.0 whatever path the running version prefers: SLIRP delivers forwarded traffic to the
-# guest's eth0, never to its loopback.
-platforms = cfg.get("platforms") if isinstance(cfg.get("platforms"), dict) else {}
-api_platform = platforms.get("api_server") if isinstance(platforms.get("api_server"), dict) else {}
-extra = api_platform.get("extra") if isinstance(api_platform.get("extra"), dict) else {}
-extra.update({"host": "0.0.0.0", "port": 8642, "key": token})
-api_platform["enabled"] = True
-api_platform["extra"] = extra
-platforms["api_server"] = api_platform
-cfg["platforms"] = platforms
-
-api = cfg.get("api_server") if isinstance(cfg.get("api_server"), dict) else {}
-api.update({"enabled": True, "host": "0.0.0.0", "port": 8642})
-cfg["api_server"] = api
-cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
+        print("WARNING: config.yaml left untouched (%s)" % exc)
 
 env_path = home / ".env"
-wanted = {
-    "API_SERVER_ENABLED": "true",
-    "API_SERVER_HOST": "0.0.0.0",
-    "API_SERVER_PORT": "8642",
-    "API_SERVER_KEY": token,
-}
-lines = env_path.read_text().splitlines() if env_path.exists() else []
-out = []
-for line in lines:
-    name = line.split("=", 1)[0].strip() if "=" in line else ""
-    if name in wanted:
-        out.append("%s=%s" % (name, wanted.pop(name)))
-    else:
-        out.append(line)
-for name, value in wanted.items():
-    out.append("%s=%s" % (name, value))
-env_path.write_text("\n".join(out).strip() + "\n")
-env_path.chmod(0o600)
-print("agent config prepared (api_server on 0.0.0.0:8642)")
+if env_path.exists():
+    lines = env_path.read_text().splitlines()
+    kept = [line for line in lines if not line.split("=", 1)[0].strip().startswith("API_SERVER_")]
+    if len(kept) != len(lines):
+        env_path.write_text(("\n".join(kept).strip() + "\n") if kept else "")
+        print("removed obsolete API_SERVER_* entries from .env")
+    env_path.chmod(0o600)
 PYEOF
 
-echo "starting the control API on 0.0.0.0:7080"
+port_open() {
+    # Port-level probe: readiness must not depend on an authenticated HTTP endpoint (the guest
+    # may have no model configured yet).
+    python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1); sys.exit(0 if s.connect_ex(('127.0.0.1', $1))==0 else 1)" 2>/dev/null
+}
+
+wait_port() {  # wait_port <port> <label> <logfile> <seconds>
+    waited=0
+    while [ "$waited" -lt "$4" ]; do
+        if port_open "$1"; then
+            echo "[ready] $2 (port $1 after ${waited}s)"
+            return 0
+        fi
+        waited=$((waited + 1))
+        sleep 1
+    done
+    echo "[FAILED] $2 did not answer on port $1 after $4s; last log lines:"
+    tail -30 "$3" 2>/dev/null || echo "(no log at $3)"
+    return 1
+}
+
+echo "starting the control API on 0.0.0.0:$CONTROL_PORT"
 API_TOKEN="$TOKEN" nohup /usr/bin/python3 /bootstrap/api_server.py >>/var/log/control-api.log 2>&1 &
 echo $! > /var/run/control-api.pid
 
-sh /bootstrap/start_agent.sh
+API_TOKEN="$TOKEN" sh /bootstrap/start_dashboard.sh
 
-waited=0
-while [ "$waited" -lt 60 ]; do
-    if wget -q -O- http://127.0.0.1:7080/health >/dev/null 2>&1; then
-        echo "[ready] control-api"
-        break
-    fi
-    waited=$((waited + 1))
-    sleep 1
-done
-if [ "$waited" -ge 60 ]; then
-    echo "[FAILED] control-api did not answer; last log lines:"
-    tail -20 /var/log/control-api.log 2>/dev/null || echo "(no control-api log)"
+
+if [ -f /var/run/hermes-relay.pid ] && kill -0 "$(cat /var/run/hermes-relay.pid)" 2>/dev/null; then
+    echo "relay already running (pid $(cat /var/run/hermes-relay.pid))"
+else
+    echo "starting the relay on 0.0.0.0:$RELAY_PORT -> 127.0.0.1:$DASHBOARD_PORT"
+    nohup /usr/bin/python3 /bootstrap/relay.py \
+        --listen-host 0.0.0.0 --listen-port "$RELAY_PORT" \
+        --target-host 127.0.0.1 --target-port "$DASHBOARD_PORT" \
+        >>/var/log/hermes-relay.log 2>&1 &
+    echo $! > /var/run/hermes-relay.pid
 fi
 
-waited=0
-while [ "$waited" -lt 240 ]; do
-    # Port-level probe: the agent may have no model configured yet, so readiness must not depend
-    # on an authenticated HTTP endpoint answering with content.
-    if python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1); sys.exit(0 if s.connect_ex(('127.0.0.1',8642))==0 else 1)" 2>/dev/null; then
-        echo "[ready] agent"
-        break
-    fi
-    waited=$((waited + 1))
-    sleep 1
-done
-if [ "$waited" -ge 240 ]; then
-    echo "[FAILED] agent did not answer on port 8642; last log lines:"
-    tail -30 /var/log/hermes-agent.log 2>/dev/null || echo "(no agent log)"
-fi
+wait_port "$CONTROL_PORT" "control-api" /var/log/control-api.log 60
+wait_port "$DASHBOARD_PORT" "dashboard" /var/log/hermes-dashboard.log 300
+# The dashboard prints this once it has bound; surface it on the console for the app's log view.
+grep -h 'HERMES_DASHBOARD_READY' /var/log/hermes-dashboard.log 2>/dev/null | tail -1 || true
+wait_port "$RELAY_PORT" "relay" /var/log/hermes-relay.log 60
 
 echo "=== bootstrap complete ==="

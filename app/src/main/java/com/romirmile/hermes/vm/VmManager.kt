@@ -225,12 +225,14 @@ class VmManager(private val context: Context) {
         addAll(listOf("-drive", "if=none,file=$baseImage,id=base,format=qcow2,readonly=on"))
         addAll(listOf("-drive", "if=none,file=$userImage,id=user,format=qcow2"))
         addAll(listOf("-device", "virtio-blk-pci,drive=user"))
-        // Two forwardings: the guest control API and the agent's API server, both on device loopback.
+        // Two forwardings, both on device loopback: the guest control API (7080) and the in-guest
+        // relay that fronts the dashboard (9129). The old OpenAI-compatible api_server on 8642 is
+        // gone from the guest, so nothing forwards it any more.
         addAll(
             listOf(
                 "-netdev",
                 "user,id=net0,hostfwd=tcp::${EngineStore.CONTROL_PORT}-:${EngineStore.CONTROL_PORT}," +
-                    "hostfwd=tcp::${EngineStore.AGENT_PORT}-:${EngineStore.AGENT_PORT}"
+                    "hostfwd=tcp::${EngineStore.DASHBOARD_PORT}-:${EngineStore.DASHBOARD_PORT}"
             )
         )
         addAll(listOf("-device", "virtio-net-pci,netdev=net0,romfile="))
