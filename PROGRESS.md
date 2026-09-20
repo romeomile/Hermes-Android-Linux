@@ -87,6 +87,24 @@ the launcher instead of assuming a path.
 
 ## Release
 
+- **Hermes Linux 1.0.4** — https://github.com/romeomile/Hermes-Android-Linux/releases/tag/v1.0.4
+- Asset: `HermesLinux-1.0.4-debug.apk`, 224,011,436 bytes,
+  sha256 `95f9692f10cb900f8ee8a9affd743189a07a2823044cca6830c7aefd285e14aa` (verified by downloading the
+  published asset back: same sha256 as the local build; `aapt2 dump badging` reads `versionCode='5'
+  versionName='1.0.4'`; the guest disk inside it is image v11 — sha256
+  `5c4b0072a25f502066f64987587565a7324cea3c46c296575e362fbb0be4f4dc`; the dex carries the image's
+  sha256 literal and the runtime marker prefix, with no numeric counter left). `versionCode 5`,
+  `versionName 1.0.4`.
+- Fixes the reason 1.0.3 changed nothing on a device that had installed 1.0.2: the extraction marker
+  was a hand-bumped constant (`assets_extracted.1` in 1.0.1, `.2` in 1.0.2 AND 1.0.3), while 1.0.3
+  shipped a different image — so the app concluded its disk was current and kept the old guest. The
+  marker is now derived from the image itself (`BuildConfig.GUEST_IMAGE_SHA256` computed by
+  `app/build.gradle.kts`, surfaced as `com.romirmile.hermes.vm.GuestImage`), so a different image
+  always re-extracts.
+- **Never hand-maintain a guest-image marker again**: hash the asset at build time and derive the
+  marker from it (the reference file records the failure mode and the fix).
+- Local copies: `/root/hermes-android-linux-dist/HermesLinux-1.0.4-debug.apk` and
+  `RELEASE_NOTES-1.0.4.md`.
 - **Hermes Linux 1.0.3** — https://github.com/romeomile/Hermes-Android-Linux/releases/tag/v1.0.3
 - Asset: `HermesLinux-1.0.3-debug.apk`, 224,010,520 bytes,
   sha256 `7f175c83f74be1339cf775a00abdbfd43f74415dbe1b31803ebe8c0f66782c59` (verified by downloading
