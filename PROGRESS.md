@@ -87,6 +87,17 @@ the launcher instead of assuming a path.
 
 ## Release
 
+- **Hermes Linux 1.0.1** — https://github.com/romeomile/Hermes-Android-Linux/releases/tag/v1.0.1
+- Asset: `HermesLinux-1.0.1-debug.apk`, 202,111,488 bytes,
+  sha256 `262d3590f03294964073ace7816e0b121c81cb9fb19911e388d54b3d4151307c`
+  (verified by downloading the published asset back: same sha256 as the local build, and
+  `aapt2 dump badging` reads `versionCode='2' versionName='1.0.1'`)
+- `versionCode 2`, `versionName 1.0.1`, package `com.romirmile.hermeslinux`, `arm64-v8a`, debug-signed.
+  The APK embeds the guest disk uncompressed as `assets/vm/base.qcow2` (150,864,896 bytes, sha256
+  `2ced18a28c8a80a45a46839022512b75fcfd460fc437681bfef9823dc23ce451` — byte-identical to the image the
+  boot test ran against).
+- Local copies: `/root/hermes-android-linux-dist/HermesLinux-1.0.1-debug.apk` and
+  `RELEASE_NOTES-1.0.1.md`.
 - **Hermes Linux 1.0.0** — https://github.com/romeomile/Hermes-Android-Linux/releases/tag/v1.0.0
 - Asset: `HermesLinux-1.0.0-debug.apk`, 163,761,884 bytes,
   sha256 `037d55e713c8e1cd0a6ab3e655c0af5b44de7bb41aa497bd1b05b85dc37c5ad8`
