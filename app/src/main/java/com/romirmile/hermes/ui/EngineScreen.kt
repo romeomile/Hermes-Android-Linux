@@ -60,8 +60,8 @@ import com.romirmile.hermes.vm.EngineState
 import com.romirmile.hermes.vm.EngineStore
 
 /**
- * The engine screen: the Linux VM that hosts the Hermes dashboard, the address that dashboard is
- * reached on, the resources the VM may take, the model setup, and the live log.
+ * The engine screen: the Linux VM that hosts the agent, the gateway address a chat app should use,
+ * the resources the VM may take, the agent's model setup, and the live log.
  *
  * Everything here is about the local machine, so it states the current state instead of explaining
  * it, and every long operation reports the step it is on.
@@ -72,11 +72,11 @@ fun EngineScreen(
     log: List<String>,
     token: String,
     onBack: () -> Unit,
-    onOpenInterface: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onRestartAgent: () -> Unit,
     onRefresh: () -> Unit,
+    onUseAsGateway: () -> Unit,
     onApplyAgent: (provider: String, model: String, credentialName: String, credentialValue: String) -> Unit,
     onCopyLog: (String) -> Unit,
     onRunShell: (String, (String) -> Unit) -> Unit
@@ -126,7 +126,7 @@ fun EngineScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                InfoRow(stringResource(R.string.engine_endpoint), EngineStore.dashboardUrl(), clipboard)
+                InfoRow(stringResource(R.string.engine_endpoint), EngineStore.localEndpoint(), clipboard)
                 InfoRow(
                     label = stringResource(R.string.engine_key),
                     value = if (showKey) token else "•".repeat(16),
@@ -142,11 +142,8 @@ fun EngineScreen(
                     }) {
                         Text(stringResource(R.string.engine_copy_key))
                     }
-                    TextButton(
-                        onClick = onOpenInterface,
-                        enabled = state.dashboardReady
-                    ) {
-                        Text(stringResource(R.string.engine_open_interface))
+                    TextButton(onClick = onUseAsGateway) {
+                        Text(stringResource(R.string.engine_use_engine))
                     }
                 }
                 if (notice.isNotBlank()) {
@@ -175,7 +172,7 @@ fun EngineScreen(
                 )
                 EngineDropdown(
                     label = stringResource(R.string.engine_disk),
-                    options = EngineStore.DISK_CHOICES,
+                    options = EngineStore.DISK_CHOICES_GB,
                     selected = disk,
                     optionLabel = { "$it GB" },
                     onSelect = { disk = it; store.diskGb = it }
@@ -183,8 +180,7 @@ fun EngineScreen(
                 Text(
                     stringResource(R.string.engine_disk_hint),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -305,10 +301,6 @@ private fun EngineStatusCard(
         InfoRow(
             label = stringResource(R.string.engine_control),
             value = stringResource(if (state.controlReady) R.string.engine_ready else R.string.engine_unknown)
-        )
-        InfoRow(
-            label = stringResource(R.string.engine_dashboard),
-            value = stringResource(if (state.dashboardReady) R.string.engine_ready else R.string.engine_unknown)
         )
         InfoRow(stringResource(R.string.engine_agent), agentText)
         if (state.agentVersion.isNotBlank()) InfoRow(stringResource(R.string.engine_version), state.agentVersion)

@@ -55,14 +55,10 @@ class VmManager(private val context: Context) {
             if (userImage.exists()) {
                 // Set the old guest aside instead of deleting it: it is the user's data. It is not
                 // bootable on its own (its backing file is the base image, which is replaced right
-                // after this), so recovery means pairing it with the base image of the same release:
-                // unzip assets/vm/base.qcow2 from that release's APK and rename this file back to
-                // user.qcow2. Only the most recent previous disk is kept.
+                // after this), so recovery means pairing it with the base image of the same release.
                 val previous = File(vmDir, "user.qcow2.previous")
                 if (previous.exists()) previous.delete()
-                if (userImage.renameTo(previous)) {
-                    report("Kept the previous guest disk as ${previous.name}")
-                }
+                if (userImage.renameTo(previous)) report("Kept the previous guest disk as ${previous.name}")
             }
             report("Creating the writable guest disk (${store.diskGb} GB)")
             userImage.delete()
@@ -211,10 +207,10 @@ class VmManager(private val context: Context) {
     }
 
     /**
-     * Grows an existing guest disk to the size the user picked. `qemu-img resize` extends the qcow2
-     * in place, so everything already inside the guest survives, and the guest's boot script then
-     * grows its filesystem into the new space. Shrinking is deliberately never attempted: a smaller
-     * qcow2 cannot be produced without rebuilding the overlay, which would throw the guest away.
+     * Grows an existing guest disk to the size the user picked. `qemu-img resize` extends the qcow2 in
+     * place, so everything already inside the guest survives, and the guest's boot script grows its
+     * filesystem into the new space. Shrinking is never attempted: a smaller qcow2 cannot be produced
+     * without rebuilding the overlay, which would throw the guest away.
      */
     private fun growUserImage(userImage: File, diskGb: Int) {
         val current = userImageVirtualSize(userImage)
@@ -276,14 +272,12 @@ class VmManager(private val context: Context) {
         addAll(listOf("-drive", "if=none,file=$baseImage,id=base,format=qcow2,readonly=on"))
         addAll(listOf("-drive", "if=none,file=$userImage,id=user,format=qcow2"))
         addAll(listOf("-device", "virtio-blk-pci,drive=user"))
-        // Two forwardings, both on device loopback: the guest control API (7080) and the in-guest
-        // relay that fronts the dashboard (9129). The old OpenAI-compatible api_server on 8642 is
-        // gone from the guest, so nothing forwards it any more.
+        // Two forwardings: the guest control API and the agent's API server, both on device loopback.
         addAll(
             listOf(
                 "-netdev",
                 "user,id=net0,hostfwd=tcp::${EngineStore.CONTROL_PORT}-:${EngineStore.CONTROL_PORT}," +
-                    "hostfwd=tcp::${EngineStore.DASHBOARD_PORT}-:${EngineStore.DASHBOARD_PORT}"
+                    "hostfwd=tcp::${EngineStore.AGENT_PORT}-:${EngineStore.AGENT_PORT}"
             )
         )
         addAll(listOf("-device", "virtio-net-pci,netdev=net0,romfile="))
@@ -321,10 +315,10 @@ class VmManager(private val context: Context) {
         /**
          * Marker naming the guest disk already extracted into this install's storage.
          *
-         * It is derived from the image the build ships ([GuestImage]), so a new image ALWAYS forces a
-         * re-extract. A hand-maintained counter did not: 1.0.2 and 1.0.3 shipped different images
-         * under the same marker, so an app updated from 1.0.2 kept the old guest indefinitely and the
-         * new image's fixes never reached the device.
+         * Derived from the image the build ships ([GuestImage]), so a new image ALWAYS forces a
+         * re-extract. A hand-maintained counter did not: two releases shipped different images under
+         * the same marker, so an updated app kept the old guest and the new image's fixes never
+         * reached the device.
          */
         private val extractedMarker: String get() = "assets_extracted.${GuestImage.ID}"
     }

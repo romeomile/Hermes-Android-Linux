@@ -9,11 +9,11 @@ plugins {
 /**
  * Identity of the guest disk this build ships — the SHA-256 of the asset itself.
  *
- * The app extracts the disk into its own storage on first launch and only re-extracts when the
- * marker it wrote is gone, so the marker MUST change whenever the image changes. A hand-maintained
- * counter did not: 1.0.2 and 1.0.3 shipped different images under the same marker, so an app updated
- * from 1.0.2 kept the old guest forever and every fix in the new image was invisible on the device.
- * Deriving it from the file makes that class of bug impossible.
+ * The app extracts the disk into its own storage on first launch and only re-extracts when the marker
+ * it wrote is gone, so that marker MUST change whenever the image changes. A hand-maintained counter
+ * did not: two releases shipped different images under the same marker, so installs of the earlier
+ * one kept the old guest and every fix in the newer image was invisible on the device. Deriving the
+ * marker from the file makes that impossible.
  */
 val guestImageSha256: String = run {
     val image = file("src/main/assets/vm/base.qcow2.gz")
@@ -42,8 +42,8 @@ android {
         applicationId = "com.romirmile.hermeslinux"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.0.4"
+        versionCode = 6
+        versionName = "1.0.5"
         ndk { abiFilters += "arm64-v8a" }
         buildConfigField("String", "GUEST_IMAGE_SHA256", "\"$guestImageSha256\"")
     }
@@ -86,10 +86,6 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.core:core-splashscreen:1.0.1")
-
-    // The interface is a WebView running the vendored shell; WebViewAssetLoader serves those assets
-    // from an https origin instead of file://, which the shell needs for DOM storage.
-    implementation("androidx.webkit:webkit:1.12.1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 

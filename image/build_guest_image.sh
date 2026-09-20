@@ -78,7 +78,7 @@ if [ ! -f /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
     echo "       install qemu-user-static + binfmt-support, then: update-binfmts --enable qemu-aarch64" >&2
     exit 1
 fi
-for required in api_server.py init_bootstrap.sh start_dashboard.sh relay.py hermes-bootstrap.initd; do
+for required in api_server.py init_bootstrap.sh start_agent.sh start_dashboard.sh relay.py hermes-bootstrap.initd; do
     [ -f "$GUEST_DIR/$required" ] || { echo "error: missing $GUEST_DIR/$required" >&2; exit 1; }
 done
 
@@ -186,6 +186,18 @@ else
     echo "wheelhouse ready ($WHEEL_COUNT wheels, $(du -sh "$WHEELS" | cut -f1))"
 fi
 
+# aiohttp is the transport of the gateway's api_server adapter (platforms/api_server.py). It is NOT
+# part of the base install, so it must be resolved here: without it the adapter never starts, the
+# app's chat endpoint (0.0.0.0:8642) never opens, and the app looks broken for no visible reason.
+if ! ls "$WHEELS"/aiohttp-*.whl >/dev/null 2>&1; then
+    echo "resolving aiohttp (the api_server adapter's transport) for musl/aarch64"
+    python3 -m pip download --dest "$WHEELS" \
+        --platform musllinux_1_1_aarch64 --platform musllinux_1_2_aarch64 \
+        --python-version 3.11 --only-binary=:all: aiohttp \
+        || { echo "error: could not resolve aiohttp on the host" >&2; exit 1; }
+    ls -1 "$WHEELS"/*.whl | wc -l > "$WHEELS/.complete"
+fi
+
 # The tag declares its own PEP 517 backend in pyproject's [build-system] (setuptools + wheel).
 # --no-build-isolation means the GUEST's backend builds the source tree, so that exact backend
 # has to be in the wheelhouse (the only package source with --no-index) and installed in the
@@ -238,6 +250,9 @@ guest_run /bin/sh -c 'python3 -m pip show setuptools wheel 2>/dev/null | grep -E
 guest_run /bin/sh -c 'HERMES_NIX_BUILD=1 python3 -m pip install \
     --break-system-packages --no-index --find-links=/wheels --no-build-isolation --no-compile \
     /hermes-src'
+guest_run /bin/sh -c "python3 -m pip install --break-system-packages --no-index --find-links=/wheels --no-compile --upgrade aiohttp"
+# Proven, not assumed: the adapter imports this at startup.
+guest_run /bin/sh -c 'python3 -c "import aiohttp, sys; print(\"aiohttp\", aiohttp.__version__)"; echo "aiohttp import OK"'
 
 # The wheel deliberately carries no bundled assets (skills, optional-skills, optional-mcps,
 # locales) and no web_dist - the packaging wrappers point env vars at them instead
@@ -300,9 +315,9 @@ esac
 
 say "8/10 Write guest services and configuration"
 mkdir -p "$ROOTFS/bootstrap"
-cp "$GUEST_DIR/api_server.py" "$GUEST_DIR/init_bootstrap.sh" \
+cp "$GUEST_DIR/api_server.py" "$GUEST_DIR/init_bootstrap.sh" "$GUEST_DIR/start_agent.sh" \
    "$GUEST_DIR/start_dashboard.sh" "$GUEST_DIR/relay.py" "$ROOTFS/bootstrap/"
-chmod 755 "$ROOTFS/bootstrap/init_bootstrap.sh" "$ROOTFS/bootstrap/start_dashboard.sh"
+chmod 755 "$ROOTFS/bootstrap/init_bootstrap.sh" "$ROOTFS/bootstrap/start_agent.sh" "$ROOTFS/bootstrap/start_dashboard.sh"
 chmod 644 "$ROOTFS/bootstrap/api_server.py" "$ROOTFS/bootstrap/relay.py"
 
 cp "$GUEST_DIR/hermes-bootstrap.initd" "$ROOTFS/etc/init.d/hermes-bootstrap"

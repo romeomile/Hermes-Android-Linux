@@ -9,9 +9,6 @@ Auth: every endpoint except /health requires
     Authorization: Bearer <token>
 where <token> is generated on the device and handed to the guest through the
 kernel command line (api_token=...). Nothing is baked into the image.
-
-Guest services this API supervises: the Hermes dashboard on 127.0.0.1:9128
-(the app's UI, reached through /bootstrap/relay.py on 0.0.0.0:9129).
 """
 from __future__ import annotations
 
@@ -25,9 +22,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
-# The dashboard's loopback port (the service the app reaches through the relay on RELAY_PORT).
-AGENT_PORT = int(os.environ.get("HERMES_DASHBOARD_PORT",
-                                os.environ.get("HERMES_AGENT_PORT", "9128")))
+AGENT_PORT = int(os.environ.get("HERMES_AGENT_PORT", "8642"))
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", "/root/.hermes"))
 
 
@@ -46,13 +41,9 @@ def find_hermes() -> str:
 
 
 HERMES_BIN = find_hermes()
-# The dashboard is the app's UI surface now (loopback, reached through the relay); the
-# api_server gateway it used to front is gone, so the agent-facing endpoints supervise the
-# dashboard process instead. Endpoint names and JSON keys are unchanged for the app.
-AGENT_LOG = Path("/var/log/hermes-dashboard.log")
-AGENT_PID = Path("/var/run/hermes-dashboard.pid")
-START_AGENT = Path("/bootstrap/start_dashboard.sh")
-RELAY_PORT = int(os.environ.get("HERMES_RELAY_PORT", "9129"))
+AGENT_LOG = Path("/var/log/hermes-agent.log")
+AGENT_PID = Path("/var/run/hermes-agent.pid")
+START_AGENT = Path("/bootstrap/start_agent.sh")
 TOKEN_FILE = Path("/bootstrap/token")
 MAX_EXEC_TIMEOUT = 1800
 
@@ -161,8 +152,7 @@ class AgentConfigRequest(BaseModel):
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "agent": "running" if agent_running() else "stopped",
-            "agentPort": AGENT_PORT, "dashboardPort": AGENT_PORT, "relayPort": RELAY_PORT,
-            "script": START_AGENT.exists()}
+            "agentPort": AGENT_PORT, "script": START_AGENT.exists()}
 
 
 @app.post("/vm/exec", dependencies=[Depends(require_auth)])

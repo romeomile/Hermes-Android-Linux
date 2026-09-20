@@ -24,10 +24,9 @@ class EngineStore(context: Context) {
         set(value) = prefs.edit().putInt(KEY_RAM, value.coerceIn(512, 4096)).apply()
 
     /**
-     * Size of the writable guest disk, in GB. The overlay is a sparse qcow2, so this is a ceiling
-     * rather than a reservation: the phone only gives up what the guest actually writes. The guest
-     * grows its filesystem into this space at boot, which is why the value must never be lowered —
-     * shrinking an overlay means rebuilding it, and that discards everything inside.
+     * Size of the guest's writable disk. It is a sparse qcow2, so a 20 GB disk occupies only what the
+     * guest actually writes (a fresh guest uses ~150 MB). It is grown in place on the next boot when
+     * raised, and never shrunk — shrinking would mean rebuilding the disk and losing the guest.
      */
     var diskGb: Int
         get() = prefs.getInt(KEY_DISK, DEFAULT_DISK_GB).coerceIn(MIN_DISK_GB, MAX_DISK_GB)
@@ -64,33 +63,20 @@ class EngineStore(context: Context) {
         const val DEFAULT_CPU = 2
         const val DEFAULT_RAM_MB = 2048
 
-        /**
-         * Disk sizes offered in the engine screen, in GB. 20 GB is the default because the overlay
-         * is sparse — it costs nothing until the agent writes — and the guest's filesystem grows
-         * into it at boot, so the user never has to come back and ask for more room. The smallest
-         * choice still leaves well over 5 GB usable inside Linux.
-         */
-        val DISK_CHOICES = listOf(10, 20, 32, 64)
+        /** Guest disk sizes offered in the UI; the guest lists the space as usable GB. */
+        val DISK_CHOICES_GB = listOf(20, 32, 64)
         const val DEFAULT_DISK_GB = 20
         const val MIN_DISK_GB = 10
-        const val MAX_DISK_GB = 128
+        const val MAX_DISK_GB = 64
 
         /** Control API inside the guest (QEMU hostfwd: device 127.0.0.1 -> guest). */
         const val CONTROL_PORT = 7080
 
-        /**
-         * The Hermes dashboard, reached through the in-guest relay that listens on the guest's
-         * `0.0.0.0:9129`. QEMU forwards the device's `127.0.0.1:9129` to it, so the WebView and the
-         * native dashboard proxy both address loopback on this port — the same port the mobile shell
-         * was built against.
-         *
-         * The dashboard itself stays on the guest's loopback (`127.0.0.1:9128`); binding it to a
-         * non-loopback address would make it serve a login page instead of the app.
-         */
-        const val DASHBOARD_PORT = 9129
+        /** Hermes API server inside the guest. */
+        const val AGENT_PORT = 8642
 
-        /** Loopback address of the dashboard as seen from this device. */
-        fun dashboardUrl(): String = "http://127.0.0.1:$DASHBOARD_PORT"
+        /** Loopback address a chat frontend on this device can reach the agent on. */
+        fun localEndpoint(): String = "http://127.0.0.1:$AGENT_PORT"
 
         /**
          * Public provider -> credential variable names, so the setup screen can fill the right one

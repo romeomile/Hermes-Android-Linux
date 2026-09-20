@@ -21,8 +21,6 @@ data class EngineState(
     val controlReady: Boolean = false,
     val agent: AgentState = AgentState.UNKNOWN,
     val agentVersion: String = "",
-    /** True once the guest dashboard really serves its SPA on 127.0.0.1:9129. */
-    val dashboardReady: Boolean = false,
     val busy: Boolean = false,
     val step: String = "",
     val error: String? = null
@@ -62,15 +60,9 @@ object EngineController {
         _log.value = (_log.value + line).takeLast(LOG_LIMIT)
     }
 
-    fun endpoint(): String = EngineStore.dashboardUrl()
+    fun endpoint(): String = EngineStore.localEndpoint()
 
     fun token(context: Context): String = EngineStore(context.applicationContext).token
-
-    /** Shared dashboard client: it caches the session token, so one instance covers the whole app. */
-    val dashboard: DashboardClient by lazy { DashboardClient() }
-
-    /** Blocking readiness probe used by the bridge (`startEmbeddedAgent`). */
-    fun isDashboardReady(): Boolean = dashboard.isReady()
 
     /**
      * Starts the engine from wherever it currently is: safe to call on launch, from a button, or
@@ -111,21 +103,15 @@ object EngineController {
                     if (!api.startAgent()) logLine("agent start reported a failure — check the log below")
                 }
 
-                // The UI runs in a WebView against the guest dashboard, so "ready" means the
-                // dashboard really serves its page on 127.0.0.1:9129 — a TCP connect is not enough,
-                // the shell needs the SPA and its session-token marker.
-                step("Waiting for the dashboard on ${EngineStore.dashboardUrl()}")
-                val ready = awaitDashboard(DASHBOARD_TIMEOUT_SECONDS)
+                val ready = awaitAgent(api, AGENT_TIMEOUT_SECONDS)
                 val finalStatus = api.agentStatus()
                 _state.value = _state.value.copy(
-                    dashboardReady = ready,
-                    agent = if (ready || finalStatus?.running == true) AgentState.READY else AgentState.FAILED,
+                    agent = if (ready) AgentState.READY else AgentState.FAILED,
                     agentVersion = finalStatus?.version ?: "",
-                    error = if (ready) null
-                    else "the dashboard did not answer on ${EngineStore.dashboardUrl()} within ${DASHBOARD_TIMEOUT_SECONDS}s"
+                    error = if (ready) null else "the agent did not become ready within ${AGENT_TIMEOUT_SECONDS}s"
                 )
                 if (ready) {
-                    logLine("dashboard ready on ${EngineStore.dashboardUrl()}")
+                    logLine("agent ready on ${EngineStore.localEndpoint()}")
                     step("Engine ready")
                 }
             } catch (e: Exception) {
@@ -161,14 +147,12 @@ object EngineController {
             val vm = manager.status()
             val control = vm == "running" && manager.apiClient.health()
             val agent = if (control) manager.apiClient.agentStatus() else null
-            val dashboardReady = control && dashboard.isReady()
             _state.value = _state.value.copy(
                 vm = vm,
                 controlReady = control,
-                dashboardReady = dashboardReady,
                 agent = when {
                     agent == null -> _state.value.agent
-                    dashboardReady || agent.running -> AgentState.READY
+                    agent.running -> AgentState.READY
                     else -> AgentState.STOPPED
                 },
                 agentVersion = agent?.version ?: _state.value.agentVersion
@@ -179,20 +163,17 @@ object EngineController {
     fun restartAgent(context: Context, onDone: (Boolean) -> Unit = {}) {
         val app = context.applicationContext
         scope.launch {
-            _state.value = _state.value.copy(busy = true, agent = AgentState.STARTING, dashboardReady = false)
+            _state.value = _state.value.copy(busy = true, agent = AgentState.STARTING)
             val api = manager(app).apiClient
             api.stopAgent()
             val started = api.startAgent()
-            awaitAgent(api, AGENT_TIMEOUT_SECONDS)
-            // The dashboard is what the UI talks to, so wait for it to serve again.
-            val ready = awaitDashboard(DASHBOARD_TIMEOUT_SECONDS)
+            val ready = awaitAgent(api, AGENT_TIMEOUT_SECONDS)
             _state.value = _state.value.copy(
                 busy = false,
-                dashboardReady = ready,
                 agent = if (ready) AgentState.READY else AgentState.FAILED,
-                error = if (ready) null else "the dashboard did not come back within ${DASHBOARD_TIMEOUT_SECONDS}s"
+                error = if (ready) null else "the agent did not come back within ${AGENT_TIMEOUT_SECONDS}s"
             )
-            logLine(if (ready) "dashboard restarted" else "dashboard restart reported a failure")
+            logLine(if (ready) "agent restarted" else "agent restart reported a failure")
             onDone(ready && started || ready)
         }
     }
@@ -271,38 +252,14 @@ object EngineController {
         return false
     }
 
-    /**
-     * Waits until the dashboard actually serves its SPA on the forwarded port.
-     *
-     * A bare TCP connect would be a lie: the WebView must not be shown before the dashboard can
-     * answer, and the shell's first calls need the session-token marker that the page carries.
-     */
-    private suspend fun awaitDashboard(timeoutSeconds: Int): Boolean {
-        val deadline = System.currentTimeMillis() + timeoutSeconds * 1000L
-        while (System.currentTimeMillis() < deadline) {
-            if (dashboard.isReady()) return true
-            delay(1_500)
-        }
-        return false
-    }
-
     private fun step(message: String) {
         _state.value = _state.value.copy(step = message)
         logLine(message)
     }
 
     private const val LOG_LIMIT = 400
-
-    /**
-     * Budgets for a phone, not for a build host. The guest runs under QEMU's TCG emulation, and a
-     * phone is several times slower than the machine the image is built on: a boot that reaches the
-     * control API in ~3 minutes there can take 10+ minutes here. A budget that is too tight reports
-     * a failure while the guest is still coming up, which reads to the user as "the dashboard does
-     * not start".
-     */
     private const val CONTROL_TIMEOUT_SECONDS = 600
-    private const val AGENT_TIMEOUT_SECONDS = 600
-
-    /** The dashboard needs its SPA built and served; under emulation that takes a while. */
-    private const val DASHBOARD_TIMEOUT_SECONDS = 900
+    // The gateway needs minutes to bind its endpoint on this hardware (tool check_fns, env probe and
+    // database setup all run first), so this is the app's patience, not a health check.
+    private const val AGENT_TIMEOUT_SECONDS = 900
 }
