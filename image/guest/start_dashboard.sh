@@ -40,6 +40,14 @@ if [ -n "${API_TOKEN:-}" ]; then
     export HERMES_DASHBOARD_SESSION_TOKEN="$API_TOKEN"
 fi
 
+# The dashboard's Chat tab spawns `hermes --tui`, which starts its own Python gateway
+# (`python -m tui_gateway.entry`) and waits for it. Upstream's budget for that is 15s, sized for a
+# native machine; under emulation the gateway needs far longer, and the tab then sits on
+# "gateway startup timeout" instead of the chat. The spawned TUI inherits this environment, so the
+# budget is set here. RPC calls get the same treatment: a slow guest must not time out mid-turn.
+export HERMES_TUI_STARTUP_TIMEOUT_MS="${HERMES_TUI_STARTUP_TIMEOUT_MS:-600000}"
+export HERMES_TUI_RPC_TIMEOUT_MS="${HERMES_TUI_RPC_TIMEOUT_MS:-600000}"
+
 # --skip-build: the SPA was built at image-build time and is baked into the package's
 # web_dist. --no-open: there is no browser in the guest.
 nohup "$HERMES_BIN" dashboard --host "$DASHBOARD_HOST" --port "$DASHBOARD_PORT" \

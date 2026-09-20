@@ -257,3 +257,55 @@ guest image `app/src/main/assets/vm/base.qcow2.gz` 143 MB, sha256
 `versionName 1.0.1` (unchanged, per the standing rule), carrying the v7 image (its
 `assets/vm/base.qcow2` unpacked sha256 matches the asset) and the fixes above verified in the dex
 (`assets_extracted.2`) and resources (the Disk strings).
+
+
+## The dashboard's chat inside the guest — three faults, and what "trying to install" really was
+
+Romeo's report ("once trying to install when the dashboard loads") was the dashboard's Chat tab
+spawning `hermes --tui` in a PTY (`web/src/pages/ChatPage.tsx` -> `WS /api/pty` ->
+`hermes_cli/web_server.pty_ws` -> `ui-tui`). Three separate faults sat in that one path:
+
+1. **No Node and no prebuilt TUI in the image.** `main_tui_launch._make_tui_argv` returns the
+   bundled `hermes_cli/tui_dist/entry.js` when it exists; without it the launcher prints
+   `Installing TUI dependencies…` and runs `npm install --workspace ui-tui` inside the guest. That
+   install attempt is what the UI showed. Fixed by adding `nodejs` to the guest packages and baking
+   the bundle built on the host (`ui-tui`: `npm install && npm run build:ink && npm run build`).
+2. **The bundle is ESM and lost its module marker.** Baked alone, the nearest `package.json` was
+   gone, so Node loaded `entry.js` as CommonJS and died: `SyntaxError: Cannot use import statement
+   outside a module`. Fixed by also writing `hermes_cli/tui_dist/package.json` = `{"type": "module"}`
+   (upstream relies on `ui-tui/package.json`, which is not in the image). The build now runs a smoke
+   check in the guest (`node entry.js`, fail on module errors) so a bundle that cannot load never
+   reaches the image. Note: a check that only asserts "not a refusal and not an install attempt"
+   passes on this error — assert the failure markers explicitly.
+3. **The gateway budget was sized for a native machine.** The TUI starts its own Python gateway
+   (`spawn(python, ['-m', 'tui_gateway.entry'])`, `ui-tui/src/gatewayClient.ts`) and waits
+   `HERMES_TUI_STARTUP_TIMEOUT_MS` (default 15s) for it. Under emulation that is not enough, and the
+   tab sat on `gateway startup timeout`. `image/guest/start_dashboard.sh` now exports
+   `HERMES_TUI_STARTUP_TIMEOUT_MS` / `HERMES_TUI_RPC_TIMEOUT_MS` = 600000 for the spawned TUI.
+   Related: with default config the guest also tried a **lazy `pip install` of faster-whisper** at
+   startup and burned its full 120s timeout (`/root/.hermes/logs/errors.log`: "pip not available and
+   ensurepip failed ... timed out after 120 seconds"), holding the chat on "summoning hermes".
+   `init_bootstrap.sh` now writes `security.allow_lazy_installs: false` into the guest's config
+   (merge-only, never fatal), so nothing installs at runtime — everything ships from the build.
+
+**The remaining "Setup Required" panel is not an install.** `ui-tui/src/content/setup.ts` renders it
+when no model provider is configured: "Hermes needs a model provider before the TUI can start a
+session" with `/model` and `/setup`. That configuration belongs to the VM and the app already owns
+the path: the engine screen's agent-model action posts to the guest's control API
+(`POST /agent/config`), which writes `.env` (mode 600) and `hermes config set model.provider
+model.default`. Verified end to end on a booted image with placeholder values:
+
+- `POST /agent/config` -> `{"ok": true, "env": ["DEEPSEEK_API_KEY"], "settings": ["model.provider", "model.default"], "restartRequired": true}`
+- guest `config.yaml` then holds `model: {provider: deepseek, default: deepseek-chat}` plus
+  `security: {allow_lazy_installs: false}`; `.env` holds the key at mode 600.
+- after the app's `/agent/stop` + `/agent/start`, the Chat tab reports
+  `─ starting agent… │ deepseek chat │ 1s ─/` and `❯ Try "fix the linter errors"` — the Setup
+  Required panel is gone and the VM's own Hermes drives the session.
+
+Harnesses: `/root/hermes-android-linux-build/{tui_pty_test.py, tui_render_probe.py,
+tui_ready_probe.py, tui_configured_probe.py}` (logs alongside them). Tools used here:
+`tui-configured-probe.log` is the end-to-end receipt for the app->VM configuration path.
+
+**Image v11**: 163 MB gz (node + the TUI bundle are the growth from 143 MB), sha256
+`3217c97586c755000c76f24142b0b8bfbb861954b5714530313c3780aff0a856`. APK rebuilt locally with it:
+224,010,520 bytes, `versionCode 3` / `versionName 1.0.2` (unchanged), not committed and not published.

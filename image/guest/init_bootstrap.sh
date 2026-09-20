@@ -63,9 +63,21 @@ if cfg_path.exists():
             changed = True
             if not platforms:
                 del cfg["platforms"]
+        # No lazy feature installs inside the guest. A feature the image does not ship otherwise
+        # tries `pip install` at first use and waits out its whole timeout before giving up: the
+        # speech-to-text ladder did exactly that during startup, holding the dashboard's chat on
+        # "summoning hermes" for minutes and then failing. Everything the image ships is installed
+        # at build time, and anything the user wants on top they install themselves.
+        security = cfg.get("security")
+        if not isinstance(security, dict):
+            security = {}
+            cfg["security"] = security
+        if security.get("allow_lazy_installs") is not False:
+            security["allow_lazy_installs"] = False
+            changed = True
         if changed:
             cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
-            print("removed obsolete api_server settings from config.yaml")
+            print("normalised config.yaml (dropped obsolete api_server settings, lazy installs off)")
     except Exception as exc:
         print("WARNING: config.yaml left untouched (%s)" % exc)
 

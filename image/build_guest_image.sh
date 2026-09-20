@@ -40,9 +40,12 @@ MINIROOTFS_SHA256="7ef5eef3a5b1d198dfb1610cde1ef5b0755ff5d838fb1e5e1b9f42b592148
 # with --no-build-isolation (its PEP 517 backend is setuptools).
 # e2fsprogs-extra is what ships resize2fs: the guest grows its root filesystem into the
 # writable disk the app attaches, which is how the user-chosen disk size becomes usable.
+# nodejs runs the prebuilt TUI bundle the dashboard's Chat tab spawns (see step 5); without it
+# the launcher falls back to installing TUI dependencies - an install step inside a VM that
+# already has Hermes, which the UI must never show.
 PACKAGES="alpine-base openrc bash busybox-extras curl git ripgrep nano less procps \
 coreutils findutils grep sed tar gzip xz bzip2 tzdata ca-certificates python3 py3-pip \
-py3-setuptools py3-wheel e2fsprogs e2fsprogs-extra"
+py3-setuptools py3-wheel e2fsprogs e2fsprogs-extra nodejs"
 
 # The upstream release the mobile shell targets (internal version 0.21.3).
 HERMES_TAG="${HERMES_TAG:-v2026.9.14}"
@@ -146,6 +149,21 @@ fi
 [ -f "$SPA_OUT/index.html" ] || { echo "error: the SPA build produced no $SPA_OUT/index.html" >&2; exit 1; }
 echo "SPA ready: $SPA_OUT ($(du -sh "$SPA_OUT" | cut -f1))"
 
+# The dashboard's Chat tab spawns `hermes --tui` in a PTY. When a prebuilt bundle is present
+# (hermes_cli/tui_dist/entry.js, see main_tui_launch._find_bundled_tui) the launcher runs
+# `node <bundle>` immediately; without it, it tries to npm-install the TUI workspace inside the
+# guest. That install attempt is what a user sees as "trying to install Hermes" inside a VM that
+# already has Hermes, so the bundle is built here and baked in.
+TUI_OUT="$HERMES_SRC/ui-tui/dist/entry.js"
+if [ -f "$TUI_OUT" ]; then
+    echo "reusing the built TUI bundle ($(du -h "$TUI_OUT" | cut -f1))"
+else
+    command -v npm >/dev/null || { echo "error: npm is required to build the TUI bundle" >&2; exit 1; }
+    ( cd "$HERMES_SRC/ui-tui" && npm install --no-audit --no-fund && npm run build:ink && npm run build )
+fi
+[ -f "$TUI_OUT" ] || { echo "error: the TUI build produced no $TUI_OUT" >&2; exit 1; }
+echo "TUI bundle ready: $TUI_OUT ($(du -h "$TUI_OUT" | cut -f1))"
+
 say "6/10 Resolve the runtime wheels for musl/aarch64 on the host"
 # Resolve on the HOST first (native speed), then install inside the guest from a local directory:
 # under emulation the metadata/resolution phase is the slow part. The local source directory is
@@ -243,6 +261,28 @@ cp -a "$SPA_OUT" "$ROOTFS$PKG_PARENT/hermes_cli/web_dist"
 [ -f "$ROOTFS$PKG_PARENT/hermes_cli/web_dist/index.html" ] || {
     echo "error: the SPA is not in the installed package ($PKG_PARENT/hermes_cli/web_dist)" >&2; exit 1; }
 echo "baked the SPA -> $PKG_PARENT/hermes_cli/web_dist ($(du -sh "$ROOTFS$PKG_PARENT/hermes_cli/web_dist" | cut -f1))"
+
+# The prebuilt TUI the dashboard's Chat tab runs under Node. With this file in place the launcher
+# never tries to install anything inside the guest.
+# The bundle is ESM (ui-tui/scripts/build.mjs: format 'esm') and upstream's own package.json marks
+# ui-tui as `"type": "module"`. Baked on its own, the nearest package.json is gone, so Node loads
+# entry.js as CommonJS and dies on the first `import` ("Cannot use import statement outside a
+# module"). The marker file restores the ESM decision instead of relying on Node's syntax
+# detection.
+rm -rf "$ROOTFS$PKG_PARENT/hermes_cli/tui_dist"
+mkdir -p "$ROOTFS$PKG_PARENT/hermes_cli/tui_dist"
+cp "$HERMES_SRC/ui-tui/dist/entry.js" "$ROOTFS$PKG_PARENT/hermes_cli/tui_dist/entry.js"
+printf '{ "type": "module" }\n' > "$ROOTFS$PKG_PARENT/hermes_cli/tui_dist/package.json"
+[ -f "$ROOTFS$PKG_PARENT/hermes_cli/tui_dist/entry.js" ] || {
+    echo "error: the TUI bundle is not in the installed package ($PKG_PARENT/hermes_cli/tui_dist)" >&2; exit 1; }
+echo "baked the TUI bundle -> $PKG_PARENT/hermes_cli/tui_dist/entry.js ($(du -h "$ROOTFS$PKG_PARENT/hermes_cli/tui_dist/entry.js" | cut -f1)) with its ESM marker"
+
+# Prove the bundle actually loads in the guest before the image is packed: a bundle that dies on its
+# first import looks installed and is useless.
+guest_run /bin/sh -c "cd /tmp && timeout 20 node --expose-gc $PKG_PARENT/hermes_cli/tui_dist/entry.js </dev/null >/tmp/tui-smoke.log 2>&1; \
+    if grep -qE 'Cannot use import statement|SyntaxError|ERR_MODULE' /tmp/tui-smoke.log; then \
+        echo 'error: the baked TUI bundle does not load:'; head -5 /tmp/tui-smoke.log; exit 1; \
+    else echo 'TUI bundle loads as ESM (no module errors)'; fi; rm -f /tmp/tui-smoke.log"
 
 rm -rf "$ROOTFS/hermes-src" "$ROOTFS/wheels"
 
