@@ -42,8 +42,8 @@ android {
         applicationId = "com.romirmile.hermeslinux"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.0.5"
+        versionCode = 7
+        versionName = "1.0.6"
         ndk { abiFilters += "arm64-v8a" }
         buildConfigField("String", "GUEST_IMAGE_SHA256", "\"$guestImageSha256\"")
     }
@@ -71,8 +71,10 @@ android {
     }
 
     // The guest disk image and the kernel/initrd are already compressed; aapt2 must not unpack them.
+    // The Chatterbox GGUF weights are read straight out of the APK by the install step, so they stay
+    // uncompressed too — packing and unpacking a gigabyte of already-quantized weights is pure cost.
     androidResources {
-        noCompress += listOf("gz", "virt")
+        noCompress += listOf("gz", "virt", "gguf")
     }
 
     packaging {

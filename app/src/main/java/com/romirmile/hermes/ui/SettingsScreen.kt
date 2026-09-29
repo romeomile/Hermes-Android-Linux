@@ -25,6 +25,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -81,6 +82,9 @@ fun SettingsScreen(vm: HermesViewModel, onBack: () -> Unit) {
     var speechModel by remember { mutableStateOf(settings.speechModel) }
     var speechVoice by remember { mutableStateOf(settings.speechVoice) }
     val voiceStatus by vm.voiceStatus.collectAsState()
+    val chatterboxInstalled by vm.chatterboxInstalled.collectAsState()
+    val chatterboxProgress by vm.chatterboxProgress.collectAsState()
+    val chatterboxStatus by vm.chatterboxStatus.collectAsState()
     val speechModels by vm.speechModels.collectAsState()
     val agentSetupStatus by vm.agentSetupStatus.collectAsState()
     val agentSetupRunning by vm.agentSetupRunning.collectAsState()
@@ -294,6 +298,56 @@ fun SettingsScreen(vm: HermesViewModel, onBack: () -> Unit) {
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            if (settings.speechEngine == SpeechEngine.CHATTERBOX) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    stringResource(R.string.settings_chatterbox_support),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                val progress = chatterboxProgress
+                if (progress != null) {
+                    LinearProgressIndicator(
+                        progress = { progress / 100f },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        stringResource(R.string.chatterbox_pack_installing, progress),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        stringResource(
+                            if (chatterboxInstalled) R.string.chatterbox_pack_ready
+                            else R.string.chatterbox_pack_missing
+                        ),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = { vm.installChatterboxPack() }) {
+                        Text(
+                            stringResource(
+                                if (chatterboxInstalled) R.string.chatterbox_pack_reinstall
+                                else R.string.chatterbox_pack_install
+                            ),
+                            fontSize = 13.sp
+                        )
+                    }
+                    chatterboxStatus?.let { status ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            status,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
 
             if (settings.speechEngine == SpeechEngine.AGENT) {
                 Spacer(Modifier.height(12.dp))
@@ -640,6 +694,7 @@ private fun themeLabel(mode: ThemeMode): String = stringResource(
 private fun engineLabel(engine: SpeechEngine): String = stringResource(
     when (engine) {
         SpeechEngine.PHONE -> R.string.speech_engine_phone
+        SpeechEngine.CHATTERBOX -> R.string.speech_engine_chatterbox
         SpeechEngine.AGENT -> R.string.speech_engine_agent
         SpeechEngine.OWN -> R.string.speech_engine_own
     }

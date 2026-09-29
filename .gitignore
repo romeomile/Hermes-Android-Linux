@@ -13,6 +13,10 @@ captures/
 .image-build/
 dist/
 
+# The Chatterbox model pack is ~1.3 GB (over GitHub's per-file limit) - build it with
+# chatterbox/build_model_pack.sh, or fetch it from the release assets.
+app/src/main/assets/chatterbox/*.gguf
+
 # The guest disk image is ~100 MB (over GitHub's per-file limit) - build it with
 # image/build_guest_image.sh, or fetch it from the release assets.
 app/src/main/assets/vm/base.qcow2.gz

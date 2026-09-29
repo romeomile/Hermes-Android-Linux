@@ -339,3 +339,74 @@ tui_ready_probe.py, tui_configured_probe.py}` (logs alongside them). Tools used 
 **Image v11**: 163 MB gz (node + the TUI bundle are the growth from 143 MB), sha256
 `3217c97586c755000c76f24142b0b8bfbb861954b5714530313c3780aff0a856`. APK rebuilt locally with it:
 224,010,520 bytes, `versionCode 3` / `versionName 1.0.2` (unchanged), not committed and not published.
+
+## On-device speech: Chatterbox, in the app's own process (not in the guest)
+
+**Why the guest cannot host it.** The guest is Alpine/aarch64 (musl): `pip download torch
+--platform musllinux_1_2_aarch64` has **no wheel at all** (the glibc aarch64 wheel is 454 MB), and
+`numba` is missing the same way — so the stack chatterbox-tts pins (`torch==2.6.0`, `torchaudio`,
+`transformers==5.2.0`, `librosa`, `gradio`) cannot install. Beyond that the checkpoints are 2.2 GB
+minimum (`t3_cfg` 1.06 GB + `s3gen` 1.06 GB) against a 6 GB guest disk, and the VM is fully emulated
+(`VmManager` launches `-machine virt -cpu cortex-a53` with no KVM — Android gives apps no
+`/dev/kvm`), so TTS there would be minutes per sentence. The engine therefore runs in the app's
+own process, on the phone's CPU.
+
+**Engine.** `libchatterbox.so` — the C++/ggml port of Chatterbox (MIT,
+github.com/gianni-cor/chatterbox.cpp @ `ddca05fb69c2910b0d7b5eae420d360ed98c067b`, ggml pinned to
+`58c38058` by that port's `scripts/setup-ggml.sh`), cross-compiled for arm64-v8a with NDK 28.
+`tts-cpp` + `ggml` are linked **statically into one 21 MB shared object** whose only `NEEDED` entries
+are `libc/libm/libdl` (OpenMP off — no runtime in the NDK). JNI bridge: `chatterbox/jni/`.
+Rebuild: `chatterbox/build_libchatterbox_android.sh`; weights: `chatterbox/build_model_pack.sh`.
+
+**Weights** — converted on this host from the MIT `ResembleAI/chatterbox-turbo` checkpoint (Turbo =
+English, built-in reference voice), shipped in the APK's assets and stored uncompressed:
+
+| file | bytes |
+|---|---|
+| `cbx-t3-turbo-q8.gguf` (T3, GPT-2-medium backbone) | 487,861,440 |
+| `cbx-s3gen-turbo-q8.gguf` (S3Gen + HiFT vocoder) | 829,657,344 |
+
+Variants converted for comparison: T3 `q5_0` 372 MB / `q8_0` 488 MB; S3Gen `q4_0` 790 MB / `q8_0`
+830 MB / `f16` 1065 MB. S3Gen barely shrinks at any setting: its HiFT conv kernels (K in 3/7/11/16)
+cannot take a 32-block quant and stay f32 by the port's own deny-list — not a conversion bug.
+
+**Measured here** (6 vCPU Xeon E5-2680 v2 VM, `--threads 6`, one 21-BPE sentence → 5.9-6.0 s of
+audio): T3 9.9-20.1 s + S3Gen 15.0-21.3 s → **RTF 2.6-6.2 wall-clock**, and the spread is the shared
+host rather than the models (run-to-run variance ±50 %). Inside S3Gen: encoder ~1.7 s, 2-step CFM
+~6.8 s, HiFT ~6.4 s; T3 load ~1.9-3.7 s. A phone with eight modern cores should be faster; only the
+device can say by how much.
+
+**App wiring.**
+- `data/ChatterboxVoice.kt` — JNI surface `ChatterboxNative`, deliberately a **top-level** object: a
+  nested one compiles to `ChatterboxVoice$Native` (`_00024Native` in the JNI symbol) and the bridge
+  would not resolve. Also holds the engine (lazy load, reused across replies, `cancel()`,
+  `release()`) and the one-time asset→storage pack copy with per-cent progress.
+- `SpeechEngine.CHATTERBOX`, and a voice path that chunks a reply at 220 chars, synthesizes a 24 kHz
+  WAV into the cache dir and plays it with the screen's existing `MediaPlayer`; any failure (pack
+  missing, engine error) falls back to the phone voice and says so once.
+- Settings: the engine entry, pack status, "Install model pack" with a progress bar.
+- `jniLibs/arm64-v8a/libchatterbox.so` is committed; the 1.3 GB pack is gitignored (release-asset
+  material, like the guest image).
+
+**APK**: `versionCode 7` / `versionName 1.0.6`, **1,551,071,740 bytes** with the pack inside
+(`noCompress += "gguf"`, so the copy out of assets is a straight byte copy), sha256
+`04b4ee14e02e0fac7320d83f12d1eccb1486f6ce31a02a2e55eae97cc6ac3371`, staged at
+`/root/hermes-linux-dist/HermesLinux-1.0.6-debug.apk` — not committed, not published.
+
+Audited inside the built APK: both GGUF assets (exact names/sizes `ChatterboxVoice` expects),
+`libchatterbox.so` 1,760,024 B after `llvm-strip --strip-unneeded` (the JNI entry points live in
+`.dynsym`, so all four survive) with `NEEDED` = libm/libdl/libc only, `com/romirmile/hermes/data/ChatterboxNative`
+in the dex (top-level, no `$Native`), `versionCode 7`, and **zero** host paths/credentials in the
+library — the first build carried 190 `/root/cbx` strings from `__FILE__`, which is why
+`chatterbox/CMakeLists.txt` now passes `-ffile-prefix-map` for both the checkout and the build tree
+and the build script fails if any build path survives.
+
+Delivery note: at 1.5 GB the APK cannot travel over Telegram (50 MB document cap), and Romeo's phone
+was off the tailnet when this was built, so the route is a release asset in `romeomile/Hermes-Android-Linux`
+(as every previous version was) — the tag/release for 1.0.6 was NOT created without his word.
+
+**Still to prove, on the device**: the pack install, first-reply latency, real per-sentence RTF, and
+the voice quality itself. Follow-ups worth their own round: Adreno OpenCL offload
+(`-DGGML_OPENCL=ON` plus the port's OpenCL patch — Mali is unsupported), the multilingual variant
+(23 languages, **no Russian**), and cloning a voice from a reference wav
+(`EngineOptions.reference_audio`).

@@ -18,6 +18,7 @@ import com.romirmile.hermes.data.AppSettings
 import com.romirmile.hermes.data.AgentSetup
 import com.romirmile.hermes.data.AgentTtsConfig
 import com.romirmile.hermes.data.ChatStore
+import com.romirmile.hermes.data.ChatterboxVoice
 import com.romirmile.hermes.data.CompletionNotifier
 import com.romirmile.hermes.data.GatewayAdmin
 import com.romirmile.hermes.data.SpeechCatalogue
@@ -252,6 +253,45 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
             _agentSetupStatus.value = reply.ifBlank {
                 context.getString(R.string.agent_setup_no_reply)
             }
+        }
+    }
+
+    // ---- on-device speech model pack (Chatterbox) ------------------------------------------
+
+    private val _chatterboxInstalled = MutableStateFlow(ChatterboxVoice.modelsInstalled(context))
+    val chatterboxInstalled: StateFlow<Boolean> = _chatterboxInstalled.asStateFlow()
+
+    /** null while idle, otherwise the copy progress in per cent. */
+    private val _chatterboxProgress = MutableStateFlow<Int?>(null)
+    val chatterboxProgress: StateFlow<Int?> = _chatterboxProgress.asStateFlow()
+
+    private val _chatterboxStatus = MutableStateFlow<String?>(null)
+    val chatterboxStatus: StateFlow<String?> = _chatterboxStatus.asStateFlow()
+
+    /**
+     * Copies the Chatterbox weights out of the APK into app storage (see [ChatterboxVoice]) — the
+     * one-time step that turns the bundled engine into a working voice, with a visible percentage
+     * because the pack is about a gigabyte.
+     */
+    fun installChatterboxPack() {
+        if (_chatterboxProgress.value != null) return
+        viewModelScope.launch {
+            _chatterboxProgress.value = 0
+            _chatterboxStatus.value = context.getString(R.string.chatterbox_pack_installing, 0)
+            val result = runCatching {
+                ChatterboxVoice.installModelPack(context) { percent ->
+                    _chatterboxProgress.value = percent
+                    _chatterboxStatus.value = context.getString(R.string.chatterbox_pack_installing, percent)
+                }
+            }
+            _chatterboxProgress.value = null
+            _chatterboxInstalled.value = ChatterboxVoice.modelsInstalled(context)
+            _chatterboxStatus.value = result.fold(
+                onSuccess = { context.getString(R.string.chatterbox_pack_installed) },
+                onFailure = { error ->
+                    context.getString(R.string.chatterbox_pack_failed, error.message.orEmpty())
+                }
+            )
         }
     }
 

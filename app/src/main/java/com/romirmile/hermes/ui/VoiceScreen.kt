@@ -71,6 +71,7 @@ import androidx.core.content.ContextCompat
 import com.romirmile.hermes.MessageRole
 import com.romirmile.hermes.R
 import com.romirmile.hermes.data.AgentTtsConfig
+import com.romirmile.hermes.data.ChatterboxVoice
 import com.romirmile.hermes.data.HermesVoice
 import com.romirmile.hermes.data.PhoneVoice
 import com.romirmile.hermes.data.SpeechEngine
@@ -96,6 +97,12 @@ private val STOP_PHRASES = setOf("stop", "stop it", "stop please", "cancel", "ne
 private const val DIRECT_CHUNK_CHARS = 1200
 private const val RELAY_CHUNK_CHARS = 1200
 
+/**
+ * Chunk size for the on-device model: shorter than the network engines on purpose, so the first
+ * sentence is audible while the rest of a long reply is still being synthesized.
+ */
+private const val CHATTERBOX_CHUNK_CHARS = 220
+
 /** Conventional OpenAI-compatible speech model when the user leaves the field blank. */
 private const val DEFAULT_OWN_SPEECH_MODEL = "tts-1"
 
@@ -115,10 +122,12 @@ fun VoiceScreen(vm: HermesViewModel, onClose: () -> Unit) {
     // Spoken replies can come from the agent's own TTS setup instead of the phone engine.
     val agentVoice = settings.speechEngine == SpeechEngine.AGENT
     val ownVoice = settings.speechEngine == SpeechEngine.OWN
+    val chatterboxVoice = settings.speechEngine == SpeechEngine.CHATTERBOX
     var agentVoiceOk by remember { mutableStateOf(true) }
     var agentCfg by remember { mutableStateOf<AgentTtsConfig?>(null) }
     var agentVoiceFailed by remember { mutableStateOf(false) }
     var ownVoiceFailed by remember { mutableStateOf(false) }
+    var chatterboxFailed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var speechJob by remember { mutableStateOf<Job?>(null) }
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
@@ -311,6 +320,43 @@ fun VoiceScreen(vm: HermesViewModel, onClose: () -> Unit) {
         }
     }
 
+    /**
+     * Speaks with the model that runs on this device (`libchatterbox.so`): the weight pack is
+     * copied out of the APK on first use, and every later line is synthesized locally — no agent,
+     * no endpoint, no key. Split by sentence so the first audio starts while the rest is still
+     * being synthesized, and any failure falls back to the phone engine.
+     */
+    fun speakWithChatterbox(clean: String) {
+        stage = VoiceStage.SPEAKING
+        speechJob?.cancel()
+        speechJob = scope.launch {
+            for (chunk in speechChunks(clean, CHATTERBOX_CHUNK_CHARS)) {
+                val bytes = runCatching {
+                    withContext(Dispatchers.IO) { ChatterboxVoice.synthesize(context, chunk) }
+                }.getOrNull()
+                if (bytes == null) {
+                    if (!chatterboxFailed) {
+                        chatterboxFailed = true
+                        val message = if (ChatterboxVoice.modelsInstalled(context)) {
+                            R.string.voice_chatterbox_unavailable
+                        } else {
+                            R.string.voice_chatterbox_no_pack
+                        }
+                        Toast.makeText(context, context.getString(message), Toast.LENGTH_LONG).show()
+                    }
+                    speakWithPhone(chunk)
+                    return@launch
+                }
+                val file = File(context.cacheDir, "speech-chatterbox-${System.currentTimeMillis()}.wav")
+                val played = withContext(Dispatchers.IO) { file.writeBytes(bytes) }
+                    .let { playAndWait(file) }
+                file.delete()
+                if (!played) return@launch
+            }
+            if (!muted) beginListening() else stage = VoiceStage.IDLE
+        }
+    }
+
     fun speak(raw: String) {
         val clean = raw
             .replace(Regex("```[\\s\\S]*?```"), " ")
@@ -324,6 +370,7 @@ fun VoiceScreen(vm: HermesViewModel, onClose: () -> Unit) {
         }
         when {
             agentVoice && agentVoiceOk -> speakWithAgent(clean)
+            chatterboxVoice -> speakWithChatterbox(clean)
             ownVoice && settings.ownSpeechUrl.isNotBlank() -> speakWithOwn(clean)
             else -> speakWithPhone(clean)
         }
@@ -333,6 +380,7 @@ fun VoiceScreen(vm: HermesViewModel, onClose: () -> Unit) {
     fun stopSpeech() {
         speechJob?.cancel()
         speechJob = null
+        ChatterboxVoice.cancel()
         runCatching { tts.stop() }
         mediaPlayer?.let { player ->
             mediaPlayer = null
