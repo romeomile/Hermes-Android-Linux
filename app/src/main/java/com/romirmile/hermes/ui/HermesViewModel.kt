@@ -19,6 +19,7 @@ import com.romirmile.hermes.data.AgentSetup
 import com.romirmile.hermes.data.AgentTtsConfig
 import com.romirmile.hermes.data.ChatStore
 import com.romirmile.hermes.data.ChatterboxVoice
+import java.io.File
 import com.romirmile.hermes.data.CompletionNotifier
 import com.romirmile.hermes.data.GatewayAdmin
 import com.romirmile.hermes.data.SpeechCatalogue
@@ -290,6 +291,49 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
                 onSuccess = { context.getString(R.string.chatterbox_pack_installed) },
                 onFailure = { error ->
                     context.getString(R.string.chatterbox_pack_failed, error.message.orEmpty())
+                }
+            )
+        }
+    }
+
+    // ---- on-device speech self-test ---------------------------------------------------------
+
+    private val _chatterboxTestStatus = MutableStateFlow<String?>(null)
+    val chatterboxTestStatus: StateFlow<String?> = _chatterboxTestStatus.asStateFlow()
+
+    /** Absolute path of the last test clip, so the screen can play what the engine produced. */
+    private val _chatterboxTestFile = MutableStateFlow<String?>(null)
+    val chatterboxTestFile: StateFlow<String?> = _chatterboxTestFile.asStateFlow()
+
+    /**
+     * Synthesizes one fixed phrase with the on-device engine and reports what happened — the only
+     * way to tell an engine problem from an agent/network problem, since the voice screen only ever
+     * speaks replies that arrived from somewhere else.
+     */
+    fun testChatterboxVoice() {
+        if (_chatterboxProgress.value != null) return
+        viewModelScope.launch {
+            _chatterboxTestFile.value = null
+            _chatterboxTestStatus.value = context.getString(R.string.chatterbox_test_running)
+            val phrase = context.getString(R.string.chatterbox_test_phrase)
+            val started = System.currentTimeMillis()
+            val result = runCatching {
+                withContext(Dispatchers.IO) { ChatterboxVoice.synthesize(context, phrase) }
+            }
+            val elapsed = (System.currentTimeMillis() - started) / 1000.0
+            _chatterboxTestStatus.value = result.fold(
+                onSuccess = { bytes ->
+                    val file = File(context.cacheDir, "chatterbox-test.wav")
+                    file.writeBytes(bytes)
+                    _chatterboxTestFile.value = file.absolutePath
+                    val seconds = (bytes.size - 44).coerceAtLeast(0) / (24_000.0 * 2.0)
+                    context.getString(R.string.chatterbox_test_ok, elapsed, seconds)
+                },
+                onFailure = { error ->
+                    context.getString(
+                        R.string.chatterbox_test_failed,
+                        error.message ?: error.javaClass.simpleName
+                    )
                 }
             )
         }

@@ -88,7 +88,7 @@ extern "C" {
 JNIEXPORT jlong JNICALL
 Java_com_romirmile_hermes_data_ChatterboxNative_nativeCreate(
     JNIEnv * env, jobject /*thiz*/, jstring t3_gguf, jstring s3gen_gguf, jstring reference_wav,
-    jint threads, jint gpu_layers, jint seed) {
+    jint threads, jint gpu_layers, jint seed, jint n_ctx) {
     try {
         EngineOptions opts;
         opts.t3_gguf_path = toStd(env, t3_gguf);
@@ -97,6 +97,9 @@ Java_com_romirmile_hermes_data_ChatterboxNative_nativeCreate(
         opts.n_threads = threads;
         opts.n_gpu_layers = gpu_layers;
         opts.seed = seed;
+        // A phone runs a guest VM next to this engine: keep the T3 KV cache small (the GGUF default
+        // of 8196 costs ~1.5 GB) since a spoken chunk is only a few hundred tokens.
+        opts.n_ctx = n_ctx > 0 ? n_ctx : 0;
         auto * engine = new Engine(opts);
         return reinterpret_cast<jlong>(engine);
     } catch (const std::exception & e) {

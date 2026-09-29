@@ -77,9 +77,10 @@ class HermesClient {
         val conn = (URL(chatUrl(baseUrl)).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 20_000
-            // The gateway sends a `: keepalive` comment every 10 s, so a read that stalls for
-            // much longer than that means the socket is dead (e.g. the phone changed network).
-            readTimeout = 75_000
+            // Keepalives measured on a booted guest: one `: keepalive` every ~30 s while the agent
+            // prepares a turn, so a stall well past three intervals means the socket really is dead.
+            // (A cold turn under emulation needs minutes before its first token.)
+            readTimeout = 120_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             setRequestProperty("Accept", "text/event-stream")

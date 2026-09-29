@@ -410,3 +410,38 @@ the voice quality itself. Follow-ups worth their own round: Adreno OpenCL offloa
 (`-DGGML_OPENCL=ON` plus the port's OpenCL patch — Mali is unsupported), the multilingual variant
 (23 languages, **no Russian**), and cloning a voice from a reference wav
 (`EngineOptions.reference_audio`).
+
+## 1.0.7: what the chat drop was, and the on-device voice self-test
+
+Romeo's report: chat loses the connection "after a few seconds of thinking", the VM and agent look
+fine, and later the same chat works; the on-device voice produced no sound even with the pack
+installed.
+
+**Measured on a booted copy of the shipped image** (same QEMU forwards, the app's own request —
+SSE `POST /v1/chat/completions`, model pointed at a fake slow provider so no credentials are
+involved): `HTTP 200` → role frame immediately → `: keepalive` every ~30 s → **first token at
+135 s** → 30 deltas → `stop` frame → clean close at 196 s. Nothing drops on a healthy guest, and a
+cold turn under emulation really does spend about two minutes before its first token. The app's
+read timeout was 75 s while its comment claimed 10 s keepalives, so a cold turn could be abandoned
+mid-preparation and reported as "the network changed" — both are now fixed (`readTimeout` 120 s,
+honest wording); the retry with the same idempotency key is unchanged, so a retried turn is not run
+twice.
+
+**A real guest-side failure mode found while reproducing** (not proven to be Romeo's trigger): the
+gateway's startup guard refuses a missing/placeholder/<16-char `API_SERVER_KEY`, logs
+"Refusing to start" and the **gateway exits** — after which 8642 never serves. Because QEMU accepts
+the TCP connection on the phone side and only then hands it to the guest, the app sees a reset
+("Connection lost") rather than "can't reach the gateway", then "Stopped." after the retries. The
+app's own token is a 36-char UUID, which passes that guard, so this needs the device's log to
+confirm or dismiss.
+
+**On-device voice.** `ChatterboxVoice` gained a self-test (Settings → Voice engine → Chatterbox →
+"Test voice"): it synthesizes one fixed phrase, reports `Engine produced %.1f s of audio in %.1f s`
+or the exact exception, and plays the clip — the only way to separate an engine failure from a
+reply that never arrived. The T3 context is capped at 2048 (`ChatterboxVoice.T3_CONTEXT`) because
+the GGUF's 8196 costs ~1.5 GB of KV cache on a phone that is also running the guest.
+
+Diagnostic build: `versionCode 8` / `versionName 1.0.7`, **218 MB, no model pack inside** (it reuses
+the pack already installed on the device, so an update keeps app data) — published as the
+pre-release `v1.0.7-test`, sha256 `1f10adccc09f4dcb29bbbab610021dd2f026739f7298e28ad45f4f3673e86fe5`.
+The full 1.5 GB build (pack included) stays 1.0.6 until the device test passes.

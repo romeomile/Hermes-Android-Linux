@@ -64,7 +64,7 @@
 
     <!-- Errors / notices -->
     <string name="error_no_endpoint">No gateway endpoint is set. Open Settings and enter your Hermes API server URL.</string>
-    <string name="error_connection_lost">Connection lost — the network changed while Hermes was answering. Tap Regenerate to try again.</string>
+    <string name="error_connection_lost">The connection to the agent dropped while it was answering. Tap Regenerate to try again.</string>
     <string name="error_timeout">The gateway didn’t respond in time. Tap Regenerate to try again.</string>
     <string name="error_host_unreachable">Can’t reach the gateway. Check the URL in Settings and your network.</string>
     <string name="error_offline">You’re offline. Connect to a network and send again.</string>
@@ -137,6 +137,11 @@
     <string name="chatterbox_pack_installing">Installing model pack… %1$d%%</string>
     <string name="chatterbox_pack_installed">Model pack installed — voice replies now run on this device.</string>
     <string name="chatterbox_pack_failed">Model pack could not be installed: %1$s</string>
+    <string name="chatterbox_test_button">Test voice</string>
+    <string name="chatterbox_test_running">Speaking a test phrase on this device… the first run also loads the models.</string>
+    <string name="chatterbox_test_ok">Engine produced %.1f s of audio in %.1f s.</string>
+    <string name="chatterbox_test_failed">Engine test failed: %1$s</string>
+    <string name="chatterbox_test_phrase">This is Chatterbox speaking on this device.</string>
     <string name="voice_chatterbox_no_pack">Chatterbox needs its model pack — install it in Settings, using the phone voice until then.</string>
     <string name="voice_chatterbox_unavailable">Chatterbox could not speak — using the phone voice.</string>
     <string name="settings_own_speech_support">Speaks with a speech provider you set up here — any OpenAI-compatible audio endpoint (for example an OpenRouter key with a free speech model). The key is stored on this device only, and the agent needs no changes.</string>

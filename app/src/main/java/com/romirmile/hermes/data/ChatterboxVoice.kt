@@ -22,7 +22,8 @@ private object ChatterboxNative {
         referenceWav: String,
         threads: Int,
         gpuLayers: Int,
-        seed: Int
+        seed: Int,
+        nCtx: Int
     ): Long
 
     external fun nativeSynthesize(handle: Long, text: String, seed: Int): ByteArray?
@@ -56,6 +57,9 @@ object ChatterboxVoice {
     const val PACK_BYTES_APPROX = 1_320_000_000L
 
     const val DEFAULT_SEED = 42
+
+    /** T3 context cap: the GGUF's 8196 costs ~1.5 GB of KV cache, a spoken chunk needs far less. */
+    const val T3_CONTEXT = 2048
 
     /** A speech failure that should fall back to the phone engine. */
     class VoiceException(message: String) : Exception(message)
@@ -174,7 +178,8 @@ object ChatterboxVoice {
             referenceWav = "",
             threads = threads,
             gpuLayers = 0,
-            seed = DEFAULT_SEED
+            seed = DEFAULT_SEED,
+            nCtx = T3_CONTEXT
         )
         if (handle == 0L) throw VoiceException("the chatterbox engine did not start")
         loadedKey = key
