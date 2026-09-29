@@ -445,3 +445,35 @@ Diagnostic build: `versionCode 8` / `versionName 1.0.7`, **218 MB, no model pack
 the pack already installed on the device, so an update keeps app data) — published as the
 pre-release `v1.0.7-test`, sha256 `1f10adccc09f4dcb29bbbab610021dd2f026739f7298e28ad45f4f3673e86fe5`.
 The full 1.5 GB build (pack included) stays 1.0.6 until the device test passes.
+
+## The first model pack was silently broken (fixed in 1.0.8)
+
+Romeo's device test read `Engine produced 3.4 s of audio in 41 s` — and played nothing. The engine
+was working; the **vocoder GGUF** was not. Measured on the host with the same binary and text:
+
+| pack | rms | peak | audible |
+|---|---|---|---|
+| T3 q8_0 + S3Gen **q8_0** (what 1.0.6/1.0.7 shipped) | 0.0000 | 0.000 | no — 2 non-zero samples out of 63,360 |
+| T3 q8_0 + S3Gen **q4_0** | 0.0000 | 0.000 | no |
+| T3 q8_0 + S3Gen **f16** | 0.0365 | 0.384 | yes |
+| T3 q5_0 + S3Gen f16 | 0.0448 | 0.391 | yes |
+
+So the converter's block quantization of S3Gen destroys the output while every other signal stays
+healthy: T3 emits its 63 speech tokens, S3Gen "infers" 2.6 s of audio, the wav has the right
+length and sample rate. Nothing upstream can tell by inspection. T3's own quantization is fine.
+
+Fix: `S3GEN_FILE = cbx-s3gen-turbo-f16.gguf` (1.07 GB instead of 830 MB), `PACK_BYTES_APPROX`
+1.55 GB, and `build_model_pack.sh` now defaults `S3GEN_QUANT=f16` with the reason written down.
+
+Guards added so this class of bug cannot pass silently again:
+- `ChatterboxVoice.peakAmplitude(wav)` / `isAudible(wav)` — parse the returned WAV and measure it.
+- The voice test reports `Engine produced X s of audio, but it is silent (peak 0.000)` instead of
+  success, and the voice screen falls back to the phone voice instead of playing nothing.
+- `installModelPack` deletes any file in the pack directory this build does not ship, so the broken
+  830 MB vocoder cannot linger on a device that updates.
+
+Lesson for the next audio feature: **a returned buffer is not sound — measure amplitude before
+claiming a voice works.** The clip sent to Romeo before this was found was silent; nobody checked.
+
+Release: `1.0.8` (`versionCode 10`), full pack inside (~1.8 GB), latest. The broken `1.0.7` release
+was deleted once 1.0.8 was verified.

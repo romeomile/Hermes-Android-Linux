@@ -50,11 +50,16 @@ object ChatterboxVoice {
     /** Where the pack lives inside the APK and inside app storage. */
     const val ASSET_DIR = "chatterbox"
     const val T3_FILE = "cbx-t3-turbo-q8.gguf"
-    const val S3GEN_FILE = "cbx-s3gen-turbo-q8.gguf"
+    /**
+     * S3Gen ships at **f16**, not block-quantized: the converter's q8_0/q4_0 files for the vocoder
+     * produce digital silence (measured: rms 0.0000, peak 0.000 against 0.0365/0.384 at f16), which
+     * is why every clip the first voice build played was silent. Sizes: f16 1.07 GB vs q8_0 830 MB.
+     */
+    const val S3GEN_FILE = "cbx-s3gen-turbo-f16.gguf"
     val ASSET_FILES = listOf(T3_FILE, S3GEN_FILE)
 
     /** Pack size on disk, for the settings screen. */
-    const val PACK_BYTES_APPROX = 1_320_000_000L
+    const val PACK_BYTES_APPROX = 1_550_000_000L
 
     const val DEFAULT_SEED = 42
 
@@ -135,12 +140,59 @@ object ChatterboxVoice {
                     throw VoiceException("could not install $name")
                 }
             }
+            // A model that this build no longer ships must not stay on the device: the first pack's
+            // vocoder file was silently broken, and leaving 830 MB of it around would keep it
+            // loadable by an older build and waste storage.
+            dir.listFiles()?.forEach { stale ->
+                if (stale.isFile && stale.name !in ASSET_FILES) runCatching { stale.delete() }
+            }
             onProgress(100)
         }
 
     private fun sizeOfAsset(context: Context, name: String): Long = runCatching {
         context.assets.openFd("$ASSET_DIR/$name").use { it.length }
     }.getOrElse { 0L }
+
+    /**
+     * Highest absolute sample in a 16-bit mono WAV, or -1 when the bytes are not one.
+     *
+     * The engine can return a correctly sized clip that is pure silence — a bad vocoder GGUF does
+     * exactly that (that is how the first pack shipped) — so callers check this before playing or
+     * reporting success. Returning bytes is not the same as producing sound.
+     */
+    fun peakAmplitude(wav: ByteArray): Float {
+        if (wav.size < 44) return -1f
+        var offset = 12
+        var dataOffset = -1
+        var dataSize = 0
+        while (offset + 8 <= wav.size) {
+            val id = String(wav, offset, 4, Charsets.US_ASCII)
+            val size = (wav[offset + 4].toInt() and 0xFF) or
+                ((wav[offset + 5].toInt() and 0xFF) shl 8) or
+                ((wav[offset + 6].toInt() and 0xFF) shl 16) or
+                ((wav[offset + 7].toInt() and 0xFF) shl 24)
+            if (id == "data") {
+                dataOffset = offset + 8
+                dataSize = size
+                break
+            }
+            offset += 8 + size + (size and 1)
+        }
+        if (dataOffset < 0 || dataSize <= 0) return -1f
+        var peak = 0
+        var index = dataOffset
+        val end = minOf(wav.size, dataOffset + dataSize)
+        while (index + 1 < end) {
+            val sample = ((wav[index].toInt() and 0xFF) or (wav[index + 1].toInt() shl 8)).toShort().toInt()
+            val magnitude = if (sample < 0) -sample else sample
+            if (magnitude > peak) peak = magnitude
+            index += 2
+        }
+        return peak / 32768f
+    }
+
+    /** True when the clip is worth playing (not silence). */
+    fun isAudible(wav: ByteArray, threshold: Float = 0.01f): Boolean = peakAmplitude(wav) >= threshold
 
     /**
      * Synthesizes [text] into a 24 kHz mono 16-bit WAV. Serialised: the engine's KV cache and

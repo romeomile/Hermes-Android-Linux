@@ -140,6 +140,8 @@
     <string name="chatterbox_test_button">Test voice</string>
     <string name="chatterbox_test_running">Speaking a test phrase on this device… the first run also loads the models.</string>
     <string name="chatterbox_test_ok">Engine produced %.1f s of audio in %.1f s.</string>
+    <string name="chatterbox_test_silent">Engine produced %.1f s of audio, but it is silent (peak %.3f) — the model pack is bad; reinstall it.</string>
+    <string name="voice_chatterbox_silent">Chatterbox returned silence — reinstall its model pack. Using the phone voice.</string>
     <string name="chatterbox_test_failed">Engine test failed: %1$s</string>
     <string name="chatterbox_test_phrase">This is Chatterbox speaking on this device.</string>
     <string name="voice_chatterbox_no_pack">Chatterbox needs its model pack — install it in Settings, using the phone voice until then.</string>

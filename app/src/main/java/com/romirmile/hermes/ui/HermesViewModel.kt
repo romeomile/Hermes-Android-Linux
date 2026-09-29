@@ -327,7 +327,12 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
                     file.writeBytes(bytes)
                     _chatterboxTestFile.value = file.absolutePath
                     val seconds = (bytes.size - 44).coerceAtLeast(0) / (24_000.0 * 2.0)
-                    context.getString(R.string.chatterbox_test_ok, elapsed, seconds)
+                    val peak = ChatterboxVoice.peakAmplitude(bytes)
+                    if (peak < 0.01f) {
+                        context.getString(R.string.chatterbox_test_silent, seconds, peak)
+                    } else {
+                        context.getString(R.string.chatterbox_test_ok, seconds, elapsed)
+                    }
                 },
                 onFailure = { error ->
                     context.getString(

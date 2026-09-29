@@ -334,13 +334,15 @@ fun VoiceScreen(vm: HermesViewModel, onClose: () -> Unit) {
                 val bytes = runCatching {
                     withContext(Dispatchers.IO) { ChatterboxVoice.synthesize(context, chunk) }
                 }.getOrNull()
-                if (bytes == null) {
+                // Bytes are not sound: a broken vocoder model returns a full-length silent clip, and
+                // playing it would look like the voice simply doesn't work.
+                if (bytes == null || !ChatterboxVoice.isAudible(bytes)) {
                     if (!chatterboxFailed) {
                         chatterboxFailed = true
-                        val message = if (ChatterboxVoice.modelsInstalled(context)) {
-                            R.string.voice_chatterbox_unavailable
-                        } else {
-                            R.string.voice_chatterbox_no_pack
+                        val message = when {
+                            !ChatterboxVoice.modelsInstalled(context) -> R.string.voice_chatterbox_no_pack
+                            bytes != null -> R.string.voice_chatterbox_silent
+                            else -> R.string.voice_chatterbox_unavailable
                         }
                         Toast.makeText(context, context.getString(message), Toast.LENGTH_LONG).show()
                     }

@@ -22,7 +22,10 @@ OUT_DIR="${1:-app/src/main/assets/chatterbox}"
 WORK="${CHATTERBOX_WORK:-$HOME/.cache/chatterbox-work}"
 PORT_COMMIT="${CHATTERBOX_PORT_COMMIT:-ddca05fb69c2910b0d7b5eae420d360ed98c067b}"
 T3_QUANT="${T3_QUANT:-q8_0}"
-S3GEN_QUANT="${S3GEN_QUANT:-q8_0}"
+# S3Gen stays at f16: its q8_0/q4_0 conversions produce a full-length but entirely silent clip
+# (rms 0.0000 / peak 0.000 vs 0.0365 / 0.384 at f16), so a block-quantized vocoder GGUF must never
+# ship. That is 1.07 GB instead of 830 MB — correctness over size.
+S3GEN_QUANT="${S3GEN_QUANT:-f16}"
 
 PORT="$WORK/chatterbox.cpp"
 PY="$WORK/venv/bin/python"
