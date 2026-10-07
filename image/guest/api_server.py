@@ -44,6 +44,9 @@ def find_hermes() -> str:
 HERMES_BIN = find_hermes()
 AGENT_LOG = Path("/var/log/hermes-agent.log")
 AGENT_PID = Path("/var/run/hermes-agent.pid")
+# Written by /agent/stop so the supervisor below leaves a deliberately stopped agent alone.
+AGENT_HOLD = Path("/var/run/hermes-agent.hold")
+CONTROL_LOG = Path("/var/log/hermes-control.log")
 START_AGENT = Path("/bootstrap/start_agent.sh")
 TOKEN_FILE = Path("/bootstrap/token")
 MAX_EXEC_TIMEOUT = 1800
@@ -99,15 +102,81 @@ def agent_running() -> bool:
     reports an agent that exited long ago. That made `/agent/start` a silent no-op and let a client's
     readiness check pass while nothing was bound to 8642 - the port decides.
     """
-    if port_open(AGENT_PORT):
+    return port_open(AGENT_PORT)
+
+
+def pid_alive(pid: int) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
         return True
+    except OSError:
+        return False
+
+
+def signal_agent(sig: int) -> None:
     pid = agent_pid()
     if pid:
         try:
-            os.kill(pid, 0)
+            os.kill(pid, sig)
         except OSError:
             pass
-    return False
+
+
+def wait_port_open(seconds: float) -> bool:
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if port_open(AGENT_PORT):
+            return True
+        time.sleep(1)
+    return port_open(AGENT_PORT)
+
+
+def wait_port_closed(seconds: float) -> bool:
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if not port_open(AGENT_PORT):
+            return True
+        time.sleep(1)
+    return not port_open(AGENT_PORT)
+
+
+def clear_stale_agent() -> None:
+    """Signal away a process that holds the pidfile without serving the port.
+
+    A gateway that is alive but deaf is worse than a dead one: `start_agent.sh` exits early while that
+    pid lives, so every later start is a silent no-op and the port stays dark.
+    """
+    pid = agent_pid()
+    if pid and pid_alive(pid):
+        signal_agent(15)
+        deadline = time.time() + 10
+        while pid_alive(pid) and time.time() < deadline:
+            time.sleep(1)
+        if pid_alive(pid):
+            signal_agent(9)
+            deadline = time.time() + 20
+            while pid_alive(pid) and time.time() < deadline:
+                time.sleep(1)
+    try:
+        AGENT_PID.unlink()
+    except OSError:
+        pass
+
+
+def launch_agent() -> str:
+    """Run the boot script and report what it said. The caller waits for the port, not for this."""
+    proc = subprocess.run(["/bin/sh", str(START_AGENT)], capture_output=True, text=True, timeout=120)
+    return (proc.stdout or "") + (proc.stderr or "")
+
+
+def note(text: str) -> None:
+    try:
+        with CONTROL_LOG.open("a") as handle:
+            handle.write("%s  %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), text))
+    except OSError:
+        pass
 
 
 _AGENT_VERSION_CACHE = None  # str once resolved
@@ -195,46 +264,55 @@ async def agent_status() -> dict:
 
 @app.post("/agent/start", dependencies=[Depends(require_auth)])
 async def agent_start() -> dict:
+    """Launch the agent and report what the guest sees; the caller waits for the port.
+
+    Never trusts the pidfile: a live pid that is not serving the port is signalled away first, because
+    `start_agent.sh` exits early while that pid lives and this endpoint would otherwise be a silent
+    no-op. Returns after a short confirmation window instead of blocking the control API for minutes -
+    under emulation the gateway can take that long to bind, and /health has to stay answerable.
+    """
     if not Path(HERMES_BIN).exists():
         raise HTTPException(status_code=500, detail="Hermes is not installed in the guest")
-    if agent_running():
-        return {"ok": True, "started": False}
-    # start_agent.sh exits early while the pid in the pidfile is alive, and guest pids are reused:
-    # a stale file would make this call a silent no-op. The file is only cleared when the port is
-    # closed, which `agent_running()` has just established.
     try:
-        AGENT_PID.unlink()
+        AGENT_HOLD.unlink()
     except OSError:
         pass
-    proc = subprocess.run(["/bin/sh", str(START_AGENT)], capture_output=True,
-                          text=True, timeout=120)
-    deadline = time.time() + 240
-    while time.time() < deadline:
-        if agent_running():
-            return {"ok": True, "started": True, "log": tail(AGENT_LOG, 20)}
-        time.sleep(1)
-    return {"ok": False, "started": False,
-            "error": "agent was not ready within 240s",
-            "stderr": proc.stderr, "log": tail(AGENT_LOG, 40)}
+    if port_open(AGENT_PORT):
+        return {"ok": True, "started": False, "portOpen": True}
+    await asyncio.to_thread(clear_stale_agent)
+    output = await asyncio.to_thread(launch_agent)
+    opened = await asyncio.to_thread(wait_port_open, 15)
+    note("start: port %s after the launch" % ("open" if opened else "still closed"))
+    return {"ok": True, "started": True, "portOpen": opened,
+            "log": tail(AGENT_LOG, 20), "output": output.strip()[:400]}
 
 
 @app.post("/agent/stop", dependencies=[Depends(require_auth)])
 async def agent_stop() -> dict:
-    """Stop the guest-local agent by its pid file (never by process pattern)."""
+    """Stop the agent for real: terminate, escalate, and wait for the port to go dark.
+
+    A signal is not a stop - the gateway keeps answering for a while as it shuts down, and a client
+    that reads that still-open port as readiness reports a successful restart for a process that then
+    disappears. The hold file keeps the supervisor from undoing a deliberate stop.
+    """
+    try:
+        AGENT_HOLD.parent.mkdir(parents=True, exist_ok=True)
+        AGENT_HOLD.write_text("stopped by the device at %s\n" % time.strftime("%Y-%m-%d %H:%M:%S"))
+    except OSError:
+        pass
     pid = agent_pid()
     if pid:
-        try:
-            os.kill(pid, 15)
-        except OSError:
-            pass
+        signal_agent(15)
+    closed = await asyncio.to_thread(wait_port_closed, 20)
+    if not closed and pid:
+        signal_agent(9)
+        closed = await asyncio.to_thread(wait_port_closed, 20)
     try:
         AGENT_PID.unlink()
     except OSError:
         pass
-    deadline = time.time() + 30
-    while time.time() < deadline and port_open(AGENT_PORT, timeout=0.3):
-        time.sleep(1)
-    return {"ok": True, "running": agent_running()}
+    note("stop: pid %s, port %s" % (pid or "?", "closed" if closed else "still open"))
+    return {"ok": closed, "running": port_open(AGENT_PORT), "portClosed": closed}
 
 
 @app.get("/agent/log", dependencies=[Depends(require_auth)])
@@ -284,6 +362,38 @@ async def agent_config(req: AgentConfigRequest) -> dict:
             applied.append("%s (error: %s)" % (key, exc))
 
     return {"ok": True, "env": sorted(wanted), "settings": applied, "restartRequired": True}
+
+
+async def agent_supervisor() -> None:
+    """Bring the gateway back when it dies on its own.
+
+    Nothing else in the guest restarts it, so a gateway that exits - a rejected key, a crash, an OOM
+    kill - leaves the port dark until the app happens to ask again. A deliberate stop is respected
+    through the hold file, and the attempts are capped so a guest that cannot start its gateway does
+    not spin.
+    """
+    attempts: list[float] = []
+    while True:
+        await asyncio.sleep(20)
+        try:
+            if AGENT_HOLD.exists() or port_open(AGENT_PORT):
+                continue
+            if not Path(HERMES_BIN).exists():
+                continue
+            attempts = [when for when in attempts if time.time() - when < 900]
+            if len(attempts) >= 3:
+                continue
+            attempts.append(time.time())
+            note("supervisor: the agent's port is dark - restarting it (%d attempt(s) in 15 min)" % len(attempts))
+            await asyncio.to_thread(clear_stale_agent)
+            await asyncio.to_thread(launch_agent)
+        except Exception as exc:  # a supervisor that dies stops supervising
+            note("supervisor: %s" % exc)
+
+
+@app.on_event("startup")
+async def start_supervisor() -> None:
+    asyncio.create_task(agent_supervisor())
 
 
 if __name__ == "__main__":

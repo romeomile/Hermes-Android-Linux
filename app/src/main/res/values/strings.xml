@@ -71,6 +71,7 @@
     <string name="notice_reconnecting">Connection lost — reconnecting…</string>
     <string name="notice_engine_warming">Starting the on-device engine — %1$d s</string>
     <string name="error_engine_not_ready">The on-device engine did not come up in time. Open the Engine screen to see where it stopped.</string>
+    <string name="error_engine_not_ready_detail">The on-device engine could not be started: %1$s</string>
     <string name="error_send_failed">Couldn’t send this message. Please try again.</string>
     <string name="voice_title">Voice</string>
     <string name="voice_listening">Listening…</string>

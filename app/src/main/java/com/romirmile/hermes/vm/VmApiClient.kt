@@ -39,7 +39,14 @@ class VmApiClient(private val token: String) {
      * evidence: that flag is `kill -0` on a pidfile and guest pids are reused, so it can read true
      * while nothing is bound to the port.
      */
-    fun agentApiAnswers(timeoutMs: Int = 5_000): Boolean = try {
+    fun agentApiAnswers(timeoutMs: Int = 5_000): Boolean = agentApiStatus(timeoutMs) in 200..299
+
+    /**
+     * `0` while nothing is listening on the forwarded agent port, otherwise the HTTP status the agent
+     * answered with. A non-2xx is a live port with a problem behind it (a rejected key, most often),
+     * which must not read as "ready" — the app has to report what the device actually says.
+     */
+    fun agentApiStatus(timeoutMs: Int = 5_000): Int = try {
         val connection =
             (URL("${EngineStore.localEndpoint()}/v1/models").openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
@@ -47,10 +54,13 @@ class VmApiClient(private val token: String) {
                 readTimeout = timeoutMs
                 setRequestProperty("Authorization", "Bearer $token")
             }
-        connection.responseCode
-        true
+        try {
+            connection.responseCode
+        } finally {
+            connection.disconnect()
+        }
     } catch (_: Exception) {
-        false
+        0
     }
 
     fun agentStatus(): AgentStatus? = try {

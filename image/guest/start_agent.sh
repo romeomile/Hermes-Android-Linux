@@ -30,6 +30,11 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
 fi
 
 mkdir -p /var/log /var/run "$HERMES_HOME_DIR"
+# Keep the previous attempt instead of truncating it: a start that died on a configuration error is
+# exactly what the next diagnosis needs to read, and overwriting it was hiding the reason.
+if [ -s "$LOG" ]; then
+    mv -f "$LOG" "$LOG.previous" 2>/dev/null || true
+fi
 : > "$LOG"
 
 # The gateway runs in the foreground; detach it so boot can continue.

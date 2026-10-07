@@ -32,7 +32,9 @@ import com.romirmile.hermes.data.ImageStore
 import com.romirmile.hermes.data.SettingsStore
 import com.romirmile.hermes.data.StreamEvent
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -82,6 +84,37 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
     private var spokenMessageId: String? = null
 
     private var job: Job? = null
+
+    /** One in-flight wait for the on-device engine, shared by every turn queued behind it. */
+    private var operativeWait: Deferred<Boolean>? = null
+
+    /**
+     * Waits for the on-device engine, reusing a wait that is already running. Progress is shown while it
+     * lasts; the reason for a failure comes from the controller, which read it off the device.
+     */
+    private suspend fun ensureOperative(context: Context): Boolean {
+        operativeWait?.let { running -> if (running.isActive) return running.await() }
+        val wait = viewModelScope.async {
+            EngineController.awaitOperative(context) { waited ->
+                _userNotice.value = context.getString(R.string.notice_engine_warming, waited)
+            }
+        }
+        operativeWait = wait
+        return try {
+            wait.await()
+        } finally {
+            if (operativeWait === wait) operativeWait = null
+        }
+    }
+
+    private fun engineNotReadyText(context: Context): String {
+        val detail = EngineController.lastProblem
+        return if (detail.isBlank()) {
+            context.getString(R.string.error_engine_not_ready)
+        } else {
+            context.getString(R.string.error_engine_not_ready_detail, detail)
+        }
+    }
 
     /** Chats whose gateway rejected the session header — the header is not retried for them. */
     private val sessionlessChats = mutableSetOf<String>()
@@ -620,20 +653,19 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
 
         // The engine runs on this device and a cold guest needs minutes before its gateway binds, so a
         // turn sent into that window must wait for the port instead of dying on it. Warm, this check
-        // costs one loopback request and the turn goes straight through.
+        // costs one loopback request and the turn goes straight through. Concurrent sends share one
+        // wait: starting or restarting the engine twice at once would race for the same port.
         if (config.endpoint.trimEnd('/') == EngineStore.localEndpoint() && !EngineController.isOperative()) {
             job = viewModelScope.launch {
                 _sending.value = true
-                val ready = EngineController.awaitOperative(context) { waited ->
-                    _userNotice.value = context.getString(R.string.notice_engine_warming, waited)
-                }
+                val ready = ensureOperative(context)
                 _userNotice.value = null
                 _sending.value = false
                 job = null
                 if (ready) {
                     startStream(sessionId)
                 } else {
-                    appendError(sessionId, context.getString(R.string.error_engine_not_ready))
+                    appendError(sessionId, engineNotReadyText(context))
                     persist()
                 }
             }

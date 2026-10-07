@@ -42,6 +42,14 @@ object EngineController {
     /** Last line QEMU wrote to the serial console, quoted when the VM dies during startup. */
     private var lastVmLine: String = ""
 
+    /**
+     * Why the engine is not usable, in the device's own words, so the chat can say what is wrong
+     * instead of only that something is. Cleared at the start of each attempt.
+     */
+    @Volatile
+    var lastProblem: String = ""
+        private set
+
     private val _state = MutableStateFlow(EngineState())
     val state: StateFlow<EngineState> = _state.asStateFlow()
 
@@ -69,11 +77,15 @@ object EngineController {
     fun isOperative(): Boolean = managerInstance?.apiClient?.agentApiAnswers(2_000) == true
 
     /**
-     * Waits until the agent answers on the port the chat uses, starting the engine if it is not up.
+     * Waits until the agent answers on the port the chat uses, starting whatever is missing.
      *
      * A cold guest needs minutes before its gateway binds, and a turn sent into that window used to
      * die with "connection lost". Waiting here keeps the turn instead: it is sent the moment the port
      * answers. [onProgress] receives the elapsed seconds so the UI can say what it is waiting for.
+     *
+     * A running VM whose port is dark is not something to wait on — nothing in the guest restarts the
+     * gateway by itself, so the agent is asked to start (twice at most) rather than polled for five
+     * minutes. [lastProblem] then carries the reason into the message the chat shows.
      */
     suspend fun awaitOperative(
         context: Context,
@@ -82,13 +94,58 @@ object EngineController {
     ): Boolean {
         val app = context.applicationContext
         val manager = manager(app)
-        if (manager.apiClient.agentApiAnswers(2_000)) return true
-        if (!manager.isRunning()) start(app)
-        val deadline = System.currentTimeMillis() + timeoutSeconds * 1000L
+        val api = manager.apiClient
+        lastProblem = ""
+        val status = api.agentApiStatus(2_000)
+        if (status in 200..299) return true
+        if (status != 0) {
+            lastProblem = "the agent answers on ${EngineStore.localEndpoint()} but rejects the device key (HTTP $status)"
+            logLine(lastProblem)
+            return false
+        }
+        if (!manager.isRunning()) {
+            start(app)
+            if (waitForAgentPort(api, manager, timeoutSeconds, onProgress)) return true
+            if (!manager.isRunning()) return false
+            logLine("the guest booted but nothing is on ${EngineStore.localEndpoint()} — asking it to start the agent")
+        } else {
+            logLine("the engine is running but nothing is on ${EngineStore.localEndpoint()} — asking it to start the agent")
+        }
+        if (startAgentAndWait(api, manager, previousPid = 0, onProgress = onProgress)) return true
+        onProgress(timeoutSeconds)
+        val again = startAgentAndWait(api, manager, previousPid = 0, onProgress = onProgress)
+        if (!again) {
+            if (lastProblem.isBlank()) lastProblem = "the agent did not open port ${EngineStore.GUEST_AGENT_PORT} on this device"
+            logLine("giving up on the agent: $lastProblem")
+        }
+        return again
+    }
+
+    /** Waits on the port that the chat uses, without touching the agent. */
+    private suspend fun waitForAgentPort(
+        api: VmApiClient,
+        manager: VmManager,
+        timeoutSeconds: Int,
+        onProgress: (Int) -> Unit
+    ): Boolean {
+        val start = System.currentTimeMillis()
+        val deadline = start + timeoutSeconds * 1000L
         var reported = -1
         while (System.currentTimeMillis() < deadline) {
-            if (manager.apiClient.agentApiAnswers(2_000)) return true
-            val waited = ((System.currentTimeMillis() - (deadline - timeoutSeconds * 1000L)) / 1000L).toInt()
+            val status = api.agentApiStatus(2_000)
+            if (status in 200..299) return true
+            if (status != 0) {
+                lastProblem = "the agent answers on ${EngineStore.localEndpoint()} but rejects the device key (HTTP $status)"
+                logLine(lastProblem)
+                return false
+            }
+            if (!manager.isRunning()) {
+                lastProblem = "the VM process exited while the guest was starting" +
+                    (if (lastVmLine.isNotBlank()) " — last VM line: $lastVmLine" else "")
+                logLine(lastProblem)
+                return false
+            }
+            val waited = ((System.currentTimeMillis() - start) / 1000L).toInt()
             if (waited != reported && waited % 5 == 0) {
                 reported = waited
                 onProgress(waited)
@@ -225,18 +282,109 @@ object EngineController {
         scope.launch {
             _state.value = _state.value.copy(busy = true, agent = AgentState.STARTING)
             val manager = manager(app)
-            val api = manager.apiClient
-            api.stopAgent()
-            startAgentFromScratch(api, manager)
-            val ready = awaitAgentPort(api, AGENT_TIMEOUT_SECONDS)
+            val ready = cycleAgent(manager.apiClient, manager)
             _state.value = _state.value.copy(
                 busy = false,
                 agent = if (ready) AgentState.READY else AgentState.FAILED,
-                error = if (ready) null else "the agent did not come back within ${AGENT_TIMEOUT_SECONDS}s"
+                error = if (ready) null else (lastProblem.ifBlank { "the agent did not come back within ${AGENT_TIMEOUT_SECONDS}s" })
             )
             logLine(if (ready) "agent restarted" else "agent restart reported a failure")
             onDone(ready)
         }
+    }
+
+    /**
+     * A restart that proves itself, in the order the guest actually works.
+     *
+     * Signalling the old gateway is not a stop: the guest reports the port while the *dying* process
+     * is still bound to it, and the shipped guest's `/agent/start` answers "already running" off a
+     * pidfile, so the app could log "agent restarted" while nothing was listening a minute later.
+     * Here the port has to go dark first, and the new process has to show a different pid and keep
+     * answering before this returns true.
+     */
+    private suspend fun cycleAgent(
+        api: VmApiClient,
+        manager: VmManager,
+        onProgress: (Int) -> Unit = {}
+    ): Boolean {
+        lastProblem = ""
+        val before = api.agentStatus()?.pid ?: 0
+        if (before != 0) logLine("stopping the agent (pid $before)")
+        api.stopAgent()
+        val stopDeadline = System.currentTimeMillis() + STOP_TIMEOUT_SECONDS * 1000L
+        var closed = api.agentApiStatus(2_000) == 0
+        val stopStart = System.currentTimeMillis()
+        while (!closed && System.currentTimeMillis() < stopDeadline) {
+            delay(2_000)
+            closed = api.agentApiStatus(2_000) == 0
+        }
+        if (!closed) {
+            lastProblem = "the agent never released port ${EngineStore.GUEST_AGENT_PORT} — it was still answering " +
+                "${(System.currentTimeMillis() - stopStart) / 1000L}s after the stop"
+            logLine(lastProblem)
+            return false
+        }
+        logLine("agent stopped — the port is closed after ${(System.currentTimeMillis() - stopStart) / 1000L}s")
+        return startAgentAndWait(api, manager, previousPid = before, onProgress = onProgress)
+    }
+
+    /**
+     * Asks the guest to start the agent and waits for evidence: a 2xx on the port the chat uses, from a
+     * process that is not the one we just stopped, held across two samples. Failure carries the guest's
+     * own agent log, because that is where the reason is written.
+     */
+    private suspend fun startAgentAndWait(
+        api: VmApiClient,
+        manager: VmManager,
+        previousPid: Int,
+        onProgress: (Int) -> Unit = {}
+    ): Boolean {
+        step("Starting the agent inside the guest")
+        startAgentFromScratch(api, manager)
+        val start = System.currentTimeMillis()
+        val deadline = start + AGENT_TIMEOUT_SECONDS * 1000L
+        var nextReport = start + 60_000
+        var fresh = 0
+        while (System.currentTimeMillis() < deadline) {
+            val status = api.agentApiStatus(2_000)
+            if (status in 200..299) {
+                val pid = api.agentStatus()?.pid ?: 0
+                if (pid != 0 && pid == previousPid) {
+                    lastProblem = "the port is answering from the agent we just stopped (pid $pid) — the restart did not take"
+                    logLine(lastProblem)
+                    return false
+                }
+                fresh++
+                if (fresh >= 2) {
+                    val waited = (System.currentTimeMillis() - start) / 1000L
+                    logLine("agent ready on ${EngineStore.localEndpoint()} (pid $pid, ${waited}s, the port answered)")
+                    return true
+                }
+            } else {
+                fresh = 0
+                if (status == 401 || status == 403) {
+                    lastProblem = "the agent is on the port but rejects the device key (HTTP $status)"
+                }
+            }
+            if (!manager.isRunning()) {
+                lastProblem = "the VM process exited while the agent was starting" +
+                    (if (lastVmLine.isNotBlank()) " — last VM line: $lastVmLine" else "")
+                logLine(lastProblem)
+                return false
+            }
+            val waited = ((System.currentTimeMillis() - start) / 1000L).toInt()
+            if (waited != 0 && waited % 5 == 0) onProgress(waited)
+            if (System.currentTimeMillis() >= nextReport) {
+                logLine("still waiting for the agent on ${EngineStore.localEndpoint()} (${waited}s so far)")
+                nextReport = System.currentTimeMillis() + 60_000
+            }
+            delay(3_000)
+        }
+        val minutes = AGENT_TIMEOUT_SECONDS / 60
+        if (lastProblem.isBlank()) lastProblem = "the agent did not open port ${EngineStore.GUEST_AGENT_PORT} within $minutes minutes"
+        logLine(lastProblem)
+        logLine("guest agent log: ${agentLogTail(api)}")
+        return false
     }
 
     /** Writes the model provider, model and credential, then restarts the agent to apply them. */
@@ -387,6 +535,9 @@ object EngineController {
     // database setup all run first), so this is the app's patience, not a health check. The same
     // twenty minutes the relay front end waits: a phone is several times slower than a build host.
     private const val AGENT_TIMEOUT_SECONDS = 1200
+
+    /** How long the *stop* half of a restart may take: the guest's own wait for the port is 30 s. */
+    private const val STOP_TIMEOUT_SECONDS = 90
 
     /** How long a turn will wait for a cold engine before giving up on it. */
     private const val OPERATIVE_TIMEOUT_SECONDS = 300

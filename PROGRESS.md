@@ -551,6 +551,46 @@ Two more things the same screen exposed, both fixed in the app layer:
 The guest image is unchanged, so the extraction marker is unchanged: this update does **not** reset
 the guest, unlike 1.0.9. `versionCode 12`, `versionName 1.0.10`.
 
+### 1.0.12 — a restart is not a signal, and the port is the only readiness
+
+The report after the first fix (`The on-device engine did not come up in time`) is a different failure
+from the dropped connection, and it is one this app caused. The engine log from the phone shows the
+sequence:
+
+```
+18:28:21  agent configuration written      <- the model screen wrote provider, model and key
+18:28:53  agent restarted                  <- 32 s later, "restarted with the new model"
+```
+
+A fresh gateway needs far longer than 32 s to bind on that hardware (the same log shows 109 s cold), so
+"restarted" was not true: the old process was still serving its port while shutting down, so
+
+* `/agent/stop` only *signals* the gateway and waits up to 30 s; the port stays bound while it drains,
+* `/agent/start` answered `already running` off the **pidfile** on the shipped guest, and
+* the app's readiness check accepted the answer from the **dying** process.
+
+The old gateway then exited and nothing was left on the port — and nothing in the guest restarts it, so
+every later message waited for an engine that was never coming back (the app had no way to say why).
+
+* `restartAgent` now runs a real cycle: stop, then **wait for the port to go dark** (up to 90 s), then
+  start, then require a **2xx from a pid that is not the one we just stopped**, held across two samples.
+  "agent restarted" is only ever logged after that. Failure names the reason and quotes the guest's own
+  agent log.
+* `agentApiAnswers` requires **2xx** now: a port that answers `401` is a live gateway with a rejected
+  key, which is reported as exactly that instead of counting as ready.
+* A **running VM whose port is dark** is no longer waited on for five minutes — the agent is asked to
+  start, twice at most, which is what the user's own "Open the Engine screen" message was hiding. The
+  chat's error now carries `lastProblem`, read off the device.
+* Concurrent sends **share one wait** for the engine: three messages typed into a cold window used to
+  launch three waits, each of which could ask the guest to restart the agent at the same time.
+* Guest sources (`image/guest/api_server.py`, `start_agent.sh`) carry the same discipline for the next
+  image: stop terminates, escalates and waits for the port to close (with a hold file so a deliberate
+  stop stays stopped); start signals away a live-but-deaf pid instead of trusting the pidfile; and a
+  **supervisor** restarts a gateway that died on its own (capped at three attempts per 15 minutes).
+  The shipped image is unchanged, so this update does not reset anyone's guest.
+
+`versionCode 14`, `versionName 1.0.12`.
+
 ## 1.0.11 — readiness is the port, not the guest's opinion
 
 Reported after 1.0.10: the chat opened, the first message was answered with **"Connection lost —

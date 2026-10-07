@@ -141,6 +141,15 @@ installed, expect it to re-extract its own base and start fresh. There is no in-
 mounting the agent's home from app storage so the agent's own state survives an image change is the
 fix this repository wants.
 
+### Restarting the engine is verified, not assumed
+
+Signalling the gateway is not the same as stopping it, and a pidfile is not the same as a live API. The
+app therefore treats the **forwarded port** as the only readiness signal: a restart waits for the port to
+go dark before starting a new gateway, then requires a 2xx from a **different pid**, held across two
+samples. A non-2xx (a rejected key, most often) is reported as exactly that. When the VM is running but
+the port is dark, the app asks the guest to start the agent — twice at most — instead of waiting out a
+timeout, and every failure message carries the reason read off the device.
+
 ## Known limits
 
 - **arm64 only.** `armeabi-v7a` and x86_64/emulator builds do not exist yet — the biggest open gap.
