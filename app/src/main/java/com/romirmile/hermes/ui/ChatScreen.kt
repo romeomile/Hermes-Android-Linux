@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -91,6 +93,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -131,6 +135,20 @@ fun ChatScreen(
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val listState = rememberLazyListState()
+    val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
+
+    // Opening the chat must not raise the keyboard. Focus left behind by the previous screen (or a
+    // restored focus) otherwise pulls the keyboard up over the conversation the moment the chat opens.
+    // The composer takes focus when it is tapped, and not before.
+    LaunchedEffect(Unit) { focusManager.clearFocus(force = true) }
+
+    // With the keyboard up, the newest message must not stay hidden under it: the list is re-anchored
+    // to the bottom as the keyboard opens, so the conversation scrolls up with it.
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    LaunchedEffect(imeBottom) {
+        if (imeBottom > 0 && messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    }
 
     var menuOpen by remember { mutableStateOf(false) }
     var composer by remember { mutableStateOf("") }

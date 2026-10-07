@@ -13,10 +13,18 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK }
  */
 enum class SpeechEngine { PHONE, AGENT, OWN }
 
+/**
+ * How much thinking the agent is asked to do before it answers. The level travels with every message
+ * and is applied by the Hermes agent itself — the agent clamps it to what the model's provider
+ * accepts. [AGENT] sends nothing at all and leaves the agent configured as it is.
+ */
+enum class ReasoningLevel { AGENT, OFF, LOW, MEDIUM, HIGH }
+
 data class AppSettings(
     val endpoint: String = "",
     val apiKey: String = "",
     val model: String = "hermes-agent",
+    val reasoning: ReasoningLevel = ReasoningLevel.AGENT,
     val theme: ThemeMode = ThemeMode.SYSTEM,
     val speechEngine: SpeechEngine = SpeechEngine.PHONE,
     val speechModel: String = "",
@@ -39,6 +47,7 @@ object SettingsStore {
     private const val KEY_ENDPOINT = "endpoint"
     private const val KEY_API_KEY = "api_key"
     private const val KEY_MODEL = "model"
+    private const val KEY_REASONING = "reasoning"
     private const val KEY_THEME = "theme"
     private const val KEY_INSTALL_ID = "install_id"
     private const val KEY_SPEECH_ENGINE = "speech_engine"
@@ -70,10 +79,17 @@ object SettingsStore {
                 p.getString(KEY_SPEECH_ENGINE, SpeechEngine.PHONE.name) ?: SpeechEngine.PHONE.name
             )
         }.getOrDefault(SpeechEngine.PHONE)
+        // A value written by an older build (or a hand-edited preference) must not break startup.
+        val reasoning = runCatching {
+            ReasoningLevel.valueOf(
+                p.getString(KEY_REASONING, ReasoningLevel.AGENT.name) ?: ReasoningLevel.AGENT.name
+            )
+        }.getOrDefault(ReasoningLevel.AGENT)
         return AppSettings(
             endpoint = p.getString(KEY_ENDPOINT, "") ?: "",
             apiKey = SecretStore.decrypt(p.getString(KEY_API_KEY, "") ?: ""),
             model = p.getString(KEY_MODEL, "hermes-agent") ?: "hermes-agent",
+            reasoning = reasoning,
             theme = theme,
             speechEngine = engine,
             speechModel = p.getString(KEY_SPEECH_MODEL, "") ?: "",
@@ -91,6 +107,7 @@ object SettingsStore {
             .putString(KEY_ENDPOINT, settings.endpoint)
             .putString(KEY_API_KEY, SecretStore.encrypt(settings.apiKey))
             .putString(KEY_MODEL, settings.model)
+            .putString(KEY_REASONING, settings.reasoning.name)
             .putString(KEY_THEME, settings.theme.name)
             .putString(KEY_SPEECH_ENGINE, settings.speechEngine.name)
             .putString(KEY_SPEECH_MODEL, settings.speechModel)

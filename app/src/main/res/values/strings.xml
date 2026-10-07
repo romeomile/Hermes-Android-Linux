@@ -12,6 +12,10 @@
     <string name="status_stopped">Stopped.</string>
     <string name="status_running">running…</string>
     <string name="agent_activity">Agent activity</string>
+    <string name="tool_group_running">%1$d running</string>
+    <string name="tool_group_failed">%1$d failed</string>
+    <string name="cd_expand_activity">Show the commands behind this activity</string>
+    <string name="cd_collapse_activity">Hide the commands behind this activity</string>
     <string name="role_hermes">Hermes</string>
 
     <!-- Content descriptions -->
@@ -108,6 +112,21 @@
     <string name="settings_fetch_models">Fetch models</string>
     <string name="settings_test_connection">Test connection</string>
     <string name="settings_save_connection">Save connection</string>
+    <string name="settings_section_reasoning">Reasoning</string>
+    <string name="settings_reasoning_label">Reasoning effort</string>
+    <string name="settings_reasoning_agent">Agent default</string>
+    <string name="settings_reasoning_off">Off</string>
+    <string name="settings_reasoning_low">Low</string>
+    <string name="settings_reasoning_medium">Medium</string>
+    <string name="settings_reasoning_high">High</string>
+    <string name="settings_reasoning_support">How hard the agent thinks before it answers. The level is sent to the Hermes agent with every message and applied there — the agent clamps it to what your model accepts, so a level it cannot use is simply not used. Agent default sends nothing and leaves the agent as it is configured.</string>
+    <string name="settings_reasoning_check">Check the agent</string>
+    <string name="settings_reasoning_checking">Asking the agent about %1$s…</string>
+    <string name="settings_reasoning_supported">The agent accepts a reasoning level for %1$s.</string>
+    <string name="settings_reasoning_mandatory">The agent accepts a reasoning level for %1$s and cannot switch its thinking off.</string>
+    <string name="settings_reasoning_unsupported">The agent reports no reasoning level for %1$s — nothing is sent, whatever is picked here.</string>
+    <string name="settings_reasoning_unlisted">The agent answered, but does not list %1$s — check the model name above.</string>
+    <string name="settings_reasoning_offline">The agent did not answer (%1$s).</string>
     <string name="settings_section_appearance">Appearance</string>
     <string name="settings_theme_label">Theme</string>
     <string name="theme_system">System default</string>
@@ -254,4 +273,8 @@
     <string name="engine_notification_text">The Linux VM is running</string>
     <string name="engine_notification_channel">Engine</string>
     <string name="engine_notification_channel_desc">Shown while the Linux VM is running.</string>
+    <plurals name="tool_group_commands">
+        <item quantity="one">%1$d command</item>
+        <item quantity="other">%1$d commands</item>
+    </plurals>
 </resources>

@@ -8,7 +8,7 @@ API server over device loopback. No root, no Termux, no PC, no server to rent.
 
 - Repo: `romeomile/Hermes-Android-Linux` (**public** since 2026-10-07)
 - Package: `com.romirmile.hermeslinux` (deliberately different from the other Hermes app, so both can
-  be installed side by side), namespace `com.romirmile.hermes`, versionCode **11**, versionName **1.0.9**
+  be installed side by side), namespace `com.romirmile.hermes`, versionCode **20**, versionName **1.2.0**
 - minSdk 26, target/compile 35, **arm64-v8a only** (the QEMU binaries are arm64)
 
 ## Layout
@@ -550,6 +550,50 @@ Two more things the same screen exposed, both fixed in the app layer:
 
 The guest image is unchanged, so the extraction marker is unchanged: this update does **not** reset
 the guest, unlike 1.0.9. `versionCode 12`, `versionName 1.0.10`.
+
+### 1.2.0 — reasoning, applied by the agent
+
+Settings gains a **Reasoning** section, between Connection and Appearance, built with the same
+controls as the rest of the screen (dropdown, support line, check button).
+
+The level is not a provider setting the app invents: it rides with every chat turn and is applied by
+the Hermes agent itself. The request the app already sends to the agent's `/v1/chat/completions` gains
+one additive field when a level is picked:
+
+```json
+"model_options": {"reasoning": {"enabled": true, "effort": "high"}}
+```
+
+and `{"reasoning": {"enabled": false}}` for Off. With **Agent default** nothing is sent at all, so the
+agent keeps whatever it is configured with (`agent.reasoning_effort` resolved by the agent at turn
+time). The agent clamps the level to the model's own vocabulary — DeepSeek V4 accepts low/medium/high
+(max for xhigh) and maps it onto its thinking toggle plus `reasoning_effort` — so a level a model does
+not accept is dropped by the agent, not by the app. No provider is contacted by the app for this, and
+the level needs no gateway restart: it is per-request.
+
+**Check the agent** reads `GET /api/model/options` on the agent and reports what it actually says about
+the configured model: accepts a level, cannot disable thinking, reports no reasoning for this model, or
+does not list the model at all. The app therefore states a capability it read instead of assuming one.
+
+Changed files: `data/SettingsStore.kt` (ReasoningLevel + persisted preference, an unreadable value
+falls back to AGENT), `data/HermesClient.kt` (`streamChat` sends `model_options`, new
+`reasoningSupport()`), `ui/HermesViewModel.kt` (the turn carries the level, `refreshReasoning()` reads
+the agent), `ui/SettingsScreen.kt` (the section), `res/values/strings.xml` (15 strings). Chat
+transport, engine lifecycle, QEMU networking and the guest image are untouched — the reasoning field is
+additive and the guest already accepts it (verified in the shipped guest: `hermes_agent 0.21.3`,
+`gateway/platforms/api_server.py` carries `_request_reasoning_config` and the `/api/model/options`
+route).
+
+`versionCode 20`, `versionName 1.2.0`.
+
+Also in 1.2.0 — the chat's keyboard behaviour:
+
+* Opening the chat no longer raises the keyboard. Focus left behind by the previous screen (or a
+  restored focus) used to pull the keyboard up over the conversation the moment chat appeared; the
+  screen now clears focus on entry, and the composer takes focus only when it is tapped.
+* With the keyboard up the newest message no longer stays hidden under it: the list is re-anchored to
+  the bottom as the keyboard opens, so the conversation scrolls up with it instead of requiring a
+  manual scroll or closing the keyboard.
 
 ### 1.1.0 — Chatterbox removed (the 1.7 GB bundle is now 217 MB)
 

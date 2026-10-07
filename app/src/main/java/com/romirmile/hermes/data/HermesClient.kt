@@ -71,7 +71,8 @@ class HermesClient {
         turns: List<ChatTurn>,
         idempotencyKey: String? = null,
         gatewaySessionId: String? = null,
-        memoryKey: String? = null
+        memoryKey: String? = null,
+        reasoning: ReasoningLevel = ReasoningLevel.AGENT
     ): Flow<StreamEvent> = flow {
         stopped = false
         val conn = (URL(chatUrl(baseUrl)).openConnection() as HttpURLConnection).apply {
@@ -101,6 +102,25 @@ class HermesClient {
                 // The model alias on the user's Hermes agent; "hermes-agent" is the api_server default.
                 put("model", model.ifBlank { DEFAULT_MODEL })
                 put("stream", true)
+                // Reasoning goes to the Hermes agent with the turn, never to a provider from here:
+                // the agent applies it (and clamps it to the model's own vocabulary). AGENT sends
+                // nothing, so the agent keeps whatever it is configured with.
+                if (reasoning != ReasoningLevel.AGENT) {
+                    put(
+                        "model_options",
+                        JSONObject().put(
+                            "reasoning",
+                            JSONObject().apply {
+                                if (reasoning == ReasoningLevel.OFF) {
+                                    put("enabled", false)
+                                } else {
+                                    put("enabled", true)
+                                    put("effort", reasoning.name.lowercase())
+                                }
+                            }
+                        )
+                    )
+                }
                 put("messages", JSONArray().apply {
                     turns.forEach { turn ->
                         put(JSONObject().put("role", turn.role).put("content", contentFor(turn)))
@@ -337,6 +357,57 @@ class HermesClient {
     fun chatUrl(base: String) = "${normalize(base)}/chat/completions"
     fun modelsUrl(base: String) = "${normalize(base)}/models"
     fun healthUrl(base: String) = "${normalize(base)}/health"
+
+    /** `/api/model/options` lives on the gateway root, beside /v1 — not inside it. */
+    fun modelOptionsUrl(base: String) = "${normalize(base).removeSuffix("/v1")}/api/model/options"
+
+    /** What the agent reports about reasoning for the model the app is set to use. */
+    data class ReasoningSupport(val reasoning: Boolean, val canDisable: Boolean?)
+
+    /**
+     * Asks the agent what it supports: `null` means the agent answered but does not list this model.
+     * Read from the agent so the app reports a capability instead of assuming one.
+     */
+    suspend fun reasoningSupport(baseUrl: String, apiKey: String, model: String): Result<ReasoningSupport?> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val conn = open("GET", modelOptionsUrl(baseUrl), apiKey)
+                try {
+                    val code = conn.responseCode
+                    val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                        ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    if (code !in 200..299) throw IllegalStateException(httpError(code, body))
+                    readReasoning(JSONObject(body), model)
+                } finally {
+                    runCatching { conn.disconnect() }
+                }
+            }
+        }
+
+    /** The configured model's capability row; rows may carry a `provider/` prefix, so match either. */
+    private fun readReasoning(root: JSONObject, model: String): ReasoningSupport? {
+        val wanted = model.trim().lowercase()
+        if (wanted.isBlank()) return null
+        val providers = root.optJSONArray("providers") ?: return null
+        for (i in 0 until providers.length()) {
+            val caps = providers.optJSONObject(i)?.optJSONObject("capabilities") ?: continue
+            val names = caps.keys()
+            while (names.hasNext()) {
+                val name = names.next()
+                if (name.lowercase() != wanted && name.substringAfterLast('/').lowercase() != wanted) continue
+                val entry = caps.optJSONObject(name) ?: continue
+                return ReasoningSupport(
+                    reasoning = entry.optBoolean("reasoning", true),
+                    canDisable = if (entry.has("can_disable_reasoning")) {
+                        entry.optBoolean("can_disable_reasoning")
+                    } else {
+                        null
+                    }
+                )
+            }
+        }
+        return null
+    }
 
     companion object {
         /** The model alias the Hermes api_server answers to when the user has not picked one. */

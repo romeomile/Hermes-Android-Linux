@@ -62,6 +62,7 @@ import android.widget.Toast
 import com.romirmile.hermes.R
 import com.romirmile.hermes.data.AgentSetup
 import com.romirmile.hermes.data.PhoneVoice
+import com.romirmile.hermes.data.ReasoningLevel
 import com.romirmile.hermes.data.SpeechCatalogue
 import com.romirmile.hermes.data.SpeechEngine
 import com.romirmile.hermes.data.ThemeMode
@@ -80,10 +81,12 @@ fun SettingsScreen(vm: HermesViewModel, onBack: () -> Unit) {
     var showKey by remember { mutableStateOf(false) }
     var themeExpanded by remember { mutableStateOf(false) }
     var engineExpanded by remember { mutableStateOf(false) }
+    var reasoningExpanded by remember { mutableStateOf(false) }
     var speechModelExpanded by remember { mutableStateOf(false) }
     var speechModel by remember { mutableStateOf(settings.speechModel) }
     var speechVoice by remember { mutableStateOf(settings.speechVoice) }
     val voiceStatus by vm.voiceStatus.collectAsState()
+    val reasoningStatus by vm.reasoningStatus.collectAsState()
     val speechModels by vm.speechModels.collectAsState()
     val agentSetupStatus by vm.agentSetupStatus.collectAsState()
     val agentSetupRunning by vm.agentSetupRunning.collectAsState()
@@ -229,6 +232,56 @@ fun SettingsScreen(vm: HermesViewModel, onBack: () -> Unit) {
             }
 
             Spacer(Modifier.height(24.dp))
+            SectionLabel(stringResource(R.string.settings_section_reasoning))
+            ExposedDropdownMenuBox(
+                expanded = reasoningExpanded,
+                onExpandedChange = { reasoningExpanded = it }
+            ) {
+                OutlinedTextField(
+                    value = reasoningLabel(settings.reasoning),
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text(stringResource(R.string.settings_reasoning_label)) },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = reasoningExpanded)
+                    },
+                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                )
+                ExposedDropdownMenu(
+                    expanded = reasoningExpanded,
+                    onDismissRequest = { reasoningExpanded = false }
+                ) {
+                    ReasoningLevel.entries.forEach { level ->
+                        DropdownMenuItem(
+                            text = { Text(reasoningLabel(level)) },
+                            onClick = {
+                                vm.updateSettings { it.copy(reasoning = level) }
+                                reasoningExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.settings_reasoning_support),
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(onClick = { vm.refreshReasoning() }) {
+                Text(stringResource(R.string.settings_reasoning_check), fontSize = 13.sp)
+            }
+            val reasoningLine = reasoningStatus
+            if (reasoningLine != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    reasoningLine,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.height(20.dp))
             SectionLabel(stringResource(R.string.settings_section_appearance))
             ExposedDropdownMenuBox(
                 expanded = themeExpanded,
@@ -636,6 +689,17 @@ private fun themeLabel(mode: ThemeMode): String = stringResource(
         ThemeMode.SYSTEM -> R.string.theme_system
         ThemeMode.LIGHT -> R.string.theme_light
         ThemeMode.DARK -> R.string.theme_dark
+    }
+)
+
+@Composable
+private fun reasoningLabel(level: ReasoningLevel): String = stringResource(
+    when (level) {
+        ReasoningLevel.AGENT -> R.string.settings_reasoning_agent
+        ReasoningLevel.OFF -> R.string.settings_reasoning_off
+        ReasoningLevel.LOW -> R.string.settings_reasoning_low
+        ReasoningLevel.MEDIUM -> R.string.settings_reasoning_medium
+        ReasoningLevel.HIGH -> R.string.settings_reasoning_high
     }
 )
 

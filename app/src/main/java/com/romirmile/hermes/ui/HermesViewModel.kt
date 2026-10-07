@@ -194,6 +194,39 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
     private val _voiceStatus = MutableStateFlow<String?>(null)
     val voiceStatus: StateFlow<String?> = _voiceStatus.asStateFlow()
 
+    private val _reasoningStatus = MutableStateFlow<String?>(null)
+    val reasoningStatus: StateFlow<String?> = _reasoningStatus.asStateFlow()
+
+    /**
+     * Reports what the agent says it supports for reasoning on the configured model. The level itself
+     * rides with each turn, so this only reads the agent's own answer — it never assumes a capability,
+     * and a model that takes no level is said so plainly instead of being advertised as working.
+     */
+    fun refreshReasoning() {
+        val config = _settings.value
+        if (config.endpoint.isBlank()) {
+            _reasoningStatus.value = context.getString(R.string.settings_need_endpoint)
+            return
+        }
+        viewModelScope.launch {
+            _reasoningStatus.value = context.getString(R.string.settings_reasoning_checking, config.model)
+            val attempt = withContext(Dispatchers.IO) {
+                client.reasoningSupport(config.endpoint, config.apiKey, config.model)
+            }
+            val support = attempt.getOrNull()
+            _reasoningStatus.value = when {
+                attempt.isFailure -> context.getString(
+                    R.string.settings_reasoning_offline,
+                    attempt.exceptionOrNull()?.message.orEmpty().ifBlank { "unreachable" }
+                )
+                support == null -> context.getString(R.string.settings_reasoning_unlisted, config.model)
+                !support.reasoning -> context.getString(R.string.settings_reasoning_unsupported, config.model)
+                support.canDisable == false -> context.getString(R.string.settings_reasoning_mandatory, config.model)
+                else -> context.getString(R.string.settings_reasoning_supported, config.model)
+            }
+        }
+    }
+
     /**
      * Asks the agent what it can do for speech: `direct` means it handed over an endpoint and a
      * credential, so the app can pick the model itself; `relay` means the agent speaks with its own
@@ -668,7 +701,8 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
                 turns,
                 idempotencyKey,
                 gatewaySessionId = gatewaySession,
-                memoryKey = "agent:hermes-android:${SettingsStore.installId(context)}"
+                memoryKey = "agent:hermes-android:${SettingsStore.installId(context)}",
+                reasoning = config.reasoning
             ).collect { event ->
                 when (event) {
                     is StreamEvent.Delta -> {

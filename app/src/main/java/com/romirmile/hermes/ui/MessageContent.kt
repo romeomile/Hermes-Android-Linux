@@ -16,6 +16,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -30,12 +32,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -190,35 +194,90 @@ private fun CodeBlock(block: Block.Code) {
     }
 }
 
+/**
+ * The agent's tool work for one message, kept in a single collapsed tab. Tool runs are many and their
+ * output is long, so a closed tab is what the chat shows; tapping it opens every command in the run.
+ */
 @Composable
 fun ToolActivityRow(activity: List<ToolActivity>) {
     if (activity.isEmpty()) return
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        activity.forEach { item -> ToolActivityCard(item) }
-    }
-}
+    var open by remember { mutableStateOf(false) }
 
-/**
- * One agent-activity line. The summary stays one line; tapping it reveals what the agent actually
- * passed in, which is what makes a long tool run debuggable from the phone.
- */
-@Composable
-private fun ToolActivityCard(item: ToolActivity) {
-    var expanded by remember(item.id) { mutableStateOf(false) }
-    val detail = listOfNotNull(
-        item.preview.takeIf { it.isNotBlank() }?.lineSequence()?.firstOrNull()?.take(90),
-        if (item.running) stringResource(R.string.status_running)
-        else item.duration?.let { "%.1fs".format(it) }
-    ).joinToString(" · ")
+    val running = activity.count { it.running }
+    val failed = activity.count { it.error }
+    val names = activity.map { it.tool.trim() }.filter { it.isNotBlank() }.distinct()
+    val title = if (names.size == 1) names.first() else stringResource(R.string.agent_activity)
+    val counts = buildList {
+        add(pluralStringResource(R.plurals.tool_group_commands, activity.size, activity.size))
+        if (running > 0) add(stringResource(R.string.tool_group_running, running))
+        if (failed > 0) add(stringResource(R.string.tool_group_failed, failed))
+    }.joinToString(" · ")
 
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = item.preview.isNotBlank()) { expanded = !expanded }
+            .clickable { open = !open }
     ) {
-        Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = when {
+                        failed > 0 -> Icons.Default.ErrorOutline
+                        running > 0 -> Icons.Default.Build
+                        else -> Icons.Default.Check
+                    },
+                    contentDescription = null,
+                    modifier = Modifier.size(15.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        title,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        counts,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+                Icon(
+                    imageVector = if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = stringResource(
+                        if (open) R.string.cd_collapse_activity else R.string.cd_expand_activity
+                    ),
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (open) {
+                Spacer(Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    activity.forEach { item -> ToolActivityLine(item) }
+                }
+            }
+        }
+    }
+}
+
+/** One run inside the opened tab: what ran, how it ended, and what it was passed. */
+@Composable
+private fun ToolActivityLine(item: ToolActivity) {
+    val timing = if (item.running) {
+        stringResource(R.string.status_running)
+    } else {
+        item.duration?.let { "%.1fs".format(it) }.orEmpty()
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 imageVector = when {
                     item.error -> Icons.Default.ErrorOutline
@@ -226,35 +285,32 @@ private fun ToolActivityCard(item: ToolActivity) {
                     else -> Icons.Default.Check
                 },
                 contentDescription = null,
-                modifier = Modifier.size(15.dp),
+                modifier = Modifier.size(13.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.width(8.dp))
-            Column(Modifier.weight(1f)) {
+            Spacer(Modifier.width(6.dp))
+            Text(
+                item.tool.ifBlank { stringResource(R.string.agent_activity) },
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium
+            )
+            if (timing.isNotBlank()) {
+                Spacer(Modifier.width(6.dp))
                 Text(
-                    item.tool.ifBlank { stringResource(R.string.agent_activity) },
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
+                    timing,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (detail.isNotBlank()) {
-                    Text(
-                        detail,
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = if (expanded) Int.MAX_VALUE else 2
-                    )
-                }
-                if (expanded && item.preview.isNotBlank()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        item.preview,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
+        }
+        if (item.preview.isNotBlank()) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                item.preview,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
-
