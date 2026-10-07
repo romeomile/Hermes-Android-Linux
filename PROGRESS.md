@@ -103,7 +103,7 @@ the launcher instead of assuming a path.
   always re-extracts.
 - **Never hand-maintain a guest-image marker again**: hash the asset at build time and derive the
   marker from it (the reference file records the failure mode and the fix).
-- Local copies: `/root/hermes-android-linux-dist/HermesLinux-1.0.4-debug.apk` and
+- Local copies: `HermesLinux-1.0.4-debug.apk` and
   `RELEASE_NOTES-1.0.4.md`.
 - **Hermes Linux 1.0.3** — https://github.com/romeomile/Hermes-Android-Linux/releases/tag/v1.0.3
 - Asset: `HermesLinux-1.0.3-debug.apk`, 224,010,520 bytes,
@@ -115,7 +115,7 @@ the launcher instead of assuming a path.
 - Carries: the dashboard's chat working inside the guest (Node + prebuilt TUI + ESM marker + the
   gateway budget + lazy installs off), the user-sized guest disk (20 GB default), the guest-image
   marker bump, and the raised device-side waits. See the section above for the receipts.
-- Local copies: `/root/hermes-android-linux-dist/HermesLinux-1.0.3-debug.apk` and
+- Local copies: `HermesLinux-1.0.3-debug.apk` and
   `RELEASE_NOTES-1.0.3.md`.
 - **Hermes Linux 1.0.2** — https://github.com/romeomile/Hermes-Android-Linux/releases/tag/v1.0.2
 - Asset: `HermesLinux-1.0.2-debug.apk`, 202,885,388 bytes,
@@ -125,7 +125,7 @@ the launcher instead of assuming a path.
   `com.romirmile.hermeslinux`, debug-signed. Installs over 1.0.0/1.0.1 as an update.
 - Fixes the reported "the dashboard does not start" after updating from 1.0.0 (guest image marker
   `1` -> `2`; see the section below) and adds the user-sized guest disk (20 GB default, >5 GB usable).
-- Local copies: `/root/hermes-android-linux-dist/HermesLinux-1.0.2-debug.apk` and
+- Local copies: `HermesLinux-1.0.2-debug.apk` and
   `RELEASE_NOTES-1.0.2.md`.
 - **Hermes Linux 1.0.1** — https://github.com/romeomile/Hermes-Android-Linux/releases/tag/v1.0.1
 - Asset: `HermesLinux-1.0.1-debug.apk`, 202,111,488 bytes,
@@ -136,7 +136,7 @@ the launcher instead of assuming a path.
   The APK embeds the guest disk uncompressed as `assets/vm/base.qcow2` (150,864,896 bytes, sha256
   `2ced18a28c8a80a45a46839022512b75fcfd460fc437681bfef9823dc23ce451` — byte-identical to the image the
   boot test ran against).
-- Local copies: `/root/hermes-android-linux-dist/HermesLinux-1.0.1-debug.apk` and
+- Local copies: `HermesLinux-1.0.1-debug.apk` and
   `RELEASE_NOTES-1.0.1.md`.
 - **Hermes Linux 1.0.0** — https://github.com/romeomile/Hermes-Android-Linux/releases/tag/v1.0.0
 - Asset: `HermesLinux-1.0.0-debug.apk`, 163,761,884 bytes,
@@ -144,7 +144,7 @@ the launcher instead of assuming a path.
   (verified by downloading the published asset back and comparing hashes)
 - `versionCode 1`, `versionName 1.0.0`, package `com.romirmile.hermeslinux`, label "Hermes Linux",
   `arm64-v8a`, debug-signed.
-- Local copy handed over: `/root/hermes-android-linux-dist/HermesLinux-1.0.0-debug.apk`
+- Local copy handed over: `HermesLinux-1.0.0-debug.apk`
 
 ## Known limits / follow-ups
 
@@ -213,7 +213,7 @@ Verified by booting the packed image under host QEMU (`image/test_guest_image.sh
 Asset: `app/src/main/assets/vm/base.qcow2.gz` — 148,860,393 bytes (~142 MiB),
 sha256 `b2b091b64df5a311c933fd970d71057c59d6ecf710f61ad6184e7b1b8e56e1b2`; the gunzipped image hashes
 `2ced18a28c8a80a45a46839022512b75fcfd460fc437681bfef9823dc23ce451`, identical to the qcow2 the boot
-test ran against. Build log: `/root/hermes-android-linux-build/bootstrap-image-6.log`.
+test ran against. Build log: `bootstrap-image-6.log`.
 
 Chat paths, measured on the booted image (both probed with a raw WebSocket client):
 
@@ -249,7 +249,7 @@ overlay leaves the filesystem fixed, so the extra space is unusable.
 - App: `EngineStore.diskGb` + a "Disk" dropdown in the engine screen; `VmManager.growUserImage()`
   resizes in place via `qemu-img resize` when the setting grew, and deliberately never shrinks
   (that would mean rebuilding the overlay and discarding the guest).
-- Evidence, host QEMU boot of image v7 (work: /root/hermes-android-linux-build/disk_growth_test.py,
+- Evidence, host QEMU boot of image v7 (work: disk_growth_test.py,
   log `disk-growth-test.log`): 10 GB overlay -> `[ready] root filesystem 9989 MB, 9575 MB free`;
   `qemu-img resize` to 20 GB -> `virtual size: 20 GiB` with only **24 MiB** actually used (sparse);
   rebooting that same overlay -> `df -m /` = `20062 MB total, 19644 MB free`; a canary file written
@@ -263,7 +263,7 @@ design. An updated app therefore kept booting the **old** guest disk, which has 
 while the new UI expects the dashboard there.
 
 - Reproduced on the host with the 1.0.0 APK's guest disk
-  (`/root/hermes-android-linux-build/old_guest_repro.py`, log `oldguest-repro.log`): the guest reports
+  (`old_guest_repro.py`, log `oldguest-repro.log`): the guest reports
   `[ready] control-api`, `[ready] agent`, `Hermes Agent v0.19.0 (2026.7.20)` and `/bootstrap` still
   holds `start_agent.sh`, while `GET /?locale=en` and `/api/status` through the relay both fail with
   `ConnectionResetError(104, 'Connection reset by peer')`. The engine screen looks alive; there is no
@@ -313,7 +313,7 @@ spawning `hermes --tui` in a PTY (`web/src/pages/ChatPage.tsx` -> `WS /api/pty` 
    tab sat on `gateway startup timeout`. `image/guest/start_dashboard.sh` now exports
    `HERMES_TUI_STARTUP_TIMEOUT_MS` / `HERMES_TUI_RPC_TIMEOUT_MS` = 600000 for the spawned TUI.
    Related: with default config the guest also tried a **lazy `pip install` of faster-whisper** at
-   startup and burned its full 120s timeout (`/root/.hermes/logs/errors.log`: "pip not available and
+   startup and burned its full 120s timeout (the host agent's `errors.log`: "pip not available and
    ensurepip failed ... timed out after 120 seconds"), holding the chat on "summoning hermes".
    `init_bootstrap.sh` now writes `security.allow_lazy_installs: false` into the guest's config
    (merge-only, never fatal), so nothing installs at runtime — everything ships from the build.
@@ -332,7 +332,7 @@ model.default`. Verified end to end on a booted image with placeholder values:
   `─ starting agent… │ deepseek chat │ 1s ─/` and `❯ Try "fix the linter errors"` — the Setup
   Required panel is gone and the VM's own Hermes drives the session.
 
-Harnesses: `/root/hermes-android-linux-build/{tui_pty_test.py, tui_render_probe.py,
+Harnesses: `{tui_pty_test.py, tui_render_probe.py,
 tui_ready_probe.py, tui_configured_probe.py}` (logs alongside them). Tools used here:
 `tui-configured-probe.log` is the end-to-end receipt for the app->VM configuration path.
 
@@ -391,13 +391,13 @@ device can say by how much.
 **APK**: `versionCode 7` / `versionName 1.0.6`, **1,551,071,740 bytes** with the pack inside
 (`noCompress += "gguf"`, so the copy out of assets is a straight byte copy), sha256
 `04b4ee14e02e0fac7320d83f12d1eccb1486f6ce31a02a2e55eae97cc6ac3371`, staged at
-`/root/hermes-linux-dist/HermesLinux-1.0.6-debug.apk` — not committed, not published.
+`HermesLinux-1.0.6-debug.apk` — not committed, not published.
 
 Audited inside the built APK: both GGUF assets (exact names/sizes `ChatterboxVoice` expects),
 `libchatterbox.so` 1,760,024 B after `llvm-strip --strip-unneeded` (the JNI entry points live in
 `.dynsym`, so all four survive) with `NEEDED` = libm/libdl/libc only, `com/romirmile/hermes/data/ChatterboxNative`
 in the dex (top-level, no `$Native`), `versionCode 7`, and **zero** host paths/credentials in the
-library — the first build carried 190 `/root/cbx` strings from `__FILE__`, which is why
+library — the first build carried 190 build-directory strings from `__FILE__`, which is why
 `chatterbox/CMakeLists.txt` now passes `-ffile-prefix-map` for both the checkout and the build tree
 and the build script fails if any build path survives.
 

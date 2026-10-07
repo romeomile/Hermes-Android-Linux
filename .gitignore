@@ -27,3 +27,7 @@ app/src/main/assets/vm/base.qcow2.gz
 keystore.properties
 *.pem
 .env
+
+# Python bytecode
+__pycache__/
+*.pyc
