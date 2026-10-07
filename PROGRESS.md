@@ -551,7 +551,45 @@ Two more things the same screen exposed, both fixed in the app layer:
 The guest image is unchanged, so the extraction marker is unchanged: this update does **not** reset
 the guest, unlike 1.0.9. `versionCode 12`, `versionName 1.0.10`.
 
-### 1.0.12 — a restart is not a signal, and the port is the only readiness
+### 1.0.13 — the gateway's own lock, which is what actually left the port dark
+
+The cause of "The on-device engine did not come up in time" was not a timeout and not the app's
+readiness logic. It is the Hermes CLI's instance lock:
+
+```
+$ hermes gateway run
+✗ Another gateway instance is already running (PID 1498).
+  Use 'hermes gateway restart' to replace it, or 'hermes gateway stop' first.
+  Or use 'hermes gateway run --replace' to auto-replace.
+```
+
+and the lock file that produces it, read out of a guest after a stop:
+
+```
+/root/.hermes/gateway.lock
+{"pid": 1498, "kind": "hermes-gateway", "argv": ["/usr/bin/hermes","gateway","run","--accept-hooks"], ...}
+```
+
+`/agent/stop` signals the gateway and removes `/var/run/hermes-agent.pid`, but **`gateway.lock` survives**.
+Every later `hermes gateway run` - which is what `start_agent.sh` does - then refuses to start and exits,
+so the port stays dark forever while the guest's own status still looks healthy. That is the exact state
+after the model configuration was written and the agent "restarted": the guest launched a gateway that
+refused to run, and nothing on either side noticed, because readiness was a pidfile rather than the port.
+
+* The app clears the stale lock as part of starting the agent: `rm -f /var/run/hermes-agent.pid
+  /root/.hermes/gateway.lock /root/.hermes/gateway.sock` — only on the path where the port is already
+  closed, so nothing live is ever unlinked. This works with the **shipped guest image**, so 1.0.13 fixes
+  a phone that is already installed.
+* `start_agent.sh` launches `hermes gateway run --replace --accept-hooks` and clears the lock itself, so a
+  future image carries the same protection without the app's help.
+
+Verified live in a booted guest: with the stale lock in place the CLI refuses (above); after the clear
+and `--replace`, the port answers **HTTP 200 at 215 s** and the new lock names the new pid:
+`{"pid": 1734, "argv": ["/usr/bin/hermes","gateway","run","--replace","--accept-hooks"]}`.
+
+`versionCode 15`, `versionName 1.0.13`.
+
+## 1.0.12 — a restart is not a signal, and the port is the only readiness
 
 The report after the first fix (`The on-device engine did not come up in time`) is a different failure
 from the dropped connection, and it is one this app caused. The engine log from the phone shows the

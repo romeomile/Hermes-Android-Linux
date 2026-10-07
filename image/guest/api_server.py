@@ -47,6 +47,11 @@ AGENT_PID = Path("/var/run/hermes-agent.pid")
 # Written by /agent/stop so the supervisor below leaves a deliberately stopped agent alone.
 AGENT_HOLD = Path("/var/run/hermes-agent.hold")
 CONTROL_LOG = Path("/var/log/hermes-control.log")
+# How long a launched gateway may hold a pid without serving its port before the supervisor replaces
+# it, and how many starts it may attempt in half an hour. Binding under emulation takes minutes -
+# measured ~215 s on a build host, more on a phone - so this has to be generous.
+START_GRACE_SECONDS = 600
+MAX_ATTEMPTS = 3
 START_AGENT = Path("/bootstrap/start_agent.sh")
 TOKEN_FILE = Path("/bootstrap/token")
 MAX_EXEC_TIMEOUT = 1800
@@ -106,12 +111,21 @@ def agent_running() -> bool:
 
 
 def pid_alive(pid: int) -> bool:
+    """True for a live process, false for a dead one *and for a zombie*.
+
+    A `kill -9`ed gateway is often left as a zombie by the guest's init, and `kill -0` on a zombie
+    succeeds - which would make the pidfile look like a running agent when nothing serves the port.
+    """
     if not pid:
         return False
     try:
+        with open("/proc/%d/stat" % pid) as handle:
+            state = handle.read().rsplit(")", 1)[1].split()[0]
+        if state == "Z":
+            return False
         os.kill(pid, 0)
         return True
-    except OSError:
+    except (OSError, IndexError):
         return False
 
 
@@ -371,8 +385,15 @@ async def agent_supervisor() -> None:
     kill - leaves the port dark until the app happens to ask again. A deliberate stop is respected
     through the hold file, and the attempts are capped so a guest that cannot start its gateway does
     not spin.
+
+    The one thing this must never do is kill a gateway that is merely still starting: under emulation
+    binding the port takes minutes, and a retry loop that "cleans up" a live-but-slow process every
+    20 s is self-defeating - it restarts the startup clock forever. Hence: a live pid is left alone
+    until it has had its whole grace period, and a launch that is younger than that grace period is
+    never followed by another one.
     """
     attempts: list[float] = []
+    last_launch = 0.0
     while True:
         await asyncio.sleep(20)
         try:
@@ -380,11 +401,21 @@ async def agent_supervisor() -> None:
                 continue
             if not Path(HERMES_BIN).exists():
                 continue
-            attempts = [when for when in attempts if time.time() - when < 900]
-            if len(attempts) >= 3:
+            pid = agent_pid()
+            fresh_launch = time.time() - last_launch < START_GRACE_SECONDS
+            if pid_alive(pid) and fresh_launch:
+                continue  # starting, not dead: leave it the minutes it needs
+            if pid_alive(pid):
+                note("supervisor: pid %s has served nothing since the last start - replacing it" % pid)
+            elif pid:
+                note("supervisor: pid %s is gone" % pid)
+            attempts = [when for when in attempts if time.time() - when < 1800]
+            if len(attempts) >= MAX_ATTEMPTS and not fresh_launch:
                 continue
             attempts.append(time.time())
-            note("supervisor: the agent's port is dark - restarting it (%d attempt(s) in 15 min)" % len(attempts))
+            last_launch = time.time()
+            note("supervisor: the agent's port is dark - starting it (%d attempt(s) in 30 min)"
+                 % len(attempts))
             await asyncio.to_thread(clear_stale_agent)
             await asyncio.to_thread(launch_agent)
         except Exception as exc:  # a supervisor that dies stops supervising

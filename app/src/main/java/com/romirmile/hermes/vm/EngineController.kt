@@ -484,13 +484,18 @@ object EngineController {
     }
 
     /**
-     * Clear the pidfile the guest trusts, then ask it to start the agent. `start_agent.sh` exits early
-     * while the pid in `/var/run/hermes-agent.pid` is alive and guest pids are reused, so a stale file
-     * turns every later start into a silent no-op — the file is only removed here when the port is
-     * closed, which is the caller's condition for being in this path at all.
+     * Clear everything that makes the next start a no-op, then ask the guest to start the agent.
+     *
+     * `/var/run/hermes-agent.pid` makes `start_agent.sh` exit early while that pid is alive (guest pids
+     * are reused), and the CLI's own `gateway.lock` makes `hermes gateway run` refuse outright -
+     * "Another gateway instance is already running" - which is how a restart ended with a dark port and
+     * nothing coming back. Both are only removed here while the port is closed, which is the caller's
+     * condition for being in this path at all.
      */
     private fun startAgentFromScratch(api: VmApiClient, manager: VmManager) {
-        manager.exec("rm -f /var/run/hermes-agent.pid")
+        manager.exec(
+            "rm -f /var/run/hermes-agent.pid /root/.hermes/gateway.lock /root/.hermes/gateway.sock"
+        )
         if (!api.startAgent()) logLine("agent start reported a failure — the log below says why")
     }
 

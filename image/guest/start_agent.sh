@@ -37,8 +37,15 @@ if [ -s "$LOG" ]; then
 fi
 : > "$LOG"
 
+# `hermes gateway run` refuses to start while the CLI's own lock names a previous instance
+# ("Another gateway instance is already running (PID ...)"), and that lock survives a signal - which is
+# exactly how a restart left the port dark forever with a healthy-looking pidfile. This script only
+# runs when the port is closed, so the stale lock is cleared and `--replace` covers any instance the
+# CLI still believes in.
+rm -f "$HERMES_HOME_DIR/gateway.lock" "$HERMES_HOME_DIR/gateway.sock"
+
 # The gateway runs in the foreground; detach it so boot can continue.
 PYTHONUNBUFFERED=1 HERMES_HOME="$HERMES_HOME_DIR" \
-    nohup "$HERMES_BIN" gateway run --accept-hooks >>"$LOG" 2>&1 &
+    nohup "$HERMES_BIN" gateway run --replace --accept-hooks >>"$LOG" 2>&1 &
 echo $! > "$PIDFILE"
 echo "agent started (pid $(cat "$PIDFILE"))"
