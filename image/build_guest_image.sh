@@ -301,8 +301,12 @@ guest_run /bin/sh -c "cd /tmp && timeout 20 node --expose-gc $PKG_PARENT/hermes_
 
 rm -rf "$ROOTFS/hermes-src" "$ROOTFS/wheels"
 
-# Byte-compile on the host: same Python minor version, so the guest can use the result directly.
-python3 -m compileall -q "$ROOTFS$PKG_PARENT" >/dev/null 2>&1 || true
+# Byte-compile INSIDE the guest, never on the host: a .pyc records the absolute path of the source
+# it was compiled from, and this disk ships inside the APK. Compiling from the host with
+# "$ROOTFS$PKG_PARENT" baked this build host's tree into ~5,000 files - visible in every shipped
+# image from 1.0.1 to 1.0.8. Run from the chroot, the recorded path is the guest's own
+# /usr/lib/python3.11/site-packages/... instead, which is what the guest actually sees.
+guest_run /bin/sh -c "python3 -m compileall -q '$PKG_PARENT'" || true
 
 # pip puts the launcher in the distribution's bin directory; make it unambiguously resolvable.
 guest_run /bin/sh -c 'H=$(command -v hermes); [ -n "$H" ] && ln -sf "$H" /usr/local/bin/hermes; command -v hermes'
@@ -396,6 +400,18 @@ guest_run /bin/sh -c '
 '
 find "$ROOTFS/root/.hermes" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 cleanup
+
+# Fail loudly if a build-host path survived into the tree, the same way the native library build
+# checks its own binaries. A path baked into a .pyc or a __FILE__ string is invisible in review and
+# ships inside every APK asset, so the build stops here instead of publishing it.
+for pattern in "$ROOTFS" "$WORK_DIR"; do
+    if grep -rlqaF "$pattern" "$ROOTFS" 2>/dev/null; then
+        echo "error: the build host's path is baked into the guest image: $pattern" >&2
+        grep -rlqaF "$pattern" "$ROOTFS" 2>/dev/null | head -5 >&2
+        exit 1
+    fi
+done
+echo "host-path check OK: no build-host path in the guest tree"
 
 say "10/10 Pack the disk (ext4 -> qcow2 -> gzip)"
 rm -f "$RAW" "$QCOW"
