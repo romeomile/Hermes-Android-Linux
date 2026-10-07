@@ -89,7 +89,10 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
     private var operativeWait: Deferred<Boolean>? = null
 
     /**
-     * Waits for the on-device engine, reusing a wait that is already running. Progress is shown while it
+     * Waits for the on-device engine, reusing a wait that is already running in this view model.
+     *
+     * There is no race to guard against beyond that reuse: the controller owns exactly one startup
+     * operation, and this call joins it (or starts it when nobody owns it). Progress is shown while it
      * lasts; the reason for a failure comes from the controller, which read it off the device.
      */
     private suspend fun ensureOperative(context: Context): Boolean {
@@ -653,8 +656,9 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
 
         // The engine runs on this device and a cold guest needs minutes before its gateway binds, so a
         // turn sent into that window must wait for the port instead of dying on it. Warm, this check
-        // costs one loopback request and the turn goes straight through. Concurrent sends share one
-        // wait: starting or restarting the engine twice at once would race for the same port.
+        // costs one loopback request and the turn goes straight through. Sends in this view model share
+        // one wait, and the controller in turn owns a single startup operation, so a boot in progress is
+        // joined rather than duplicated.
         if (config.endpoint.trimEnd('/') == EngineStore.localEndpoint() && !EngineController.isOperative()) {
             job = viewModelScope.launch {
                 _sending.value = true

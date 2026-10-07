@@ -551,6 +551,48 @@ Two more things the same screen exposed, both fixed in the app layer:
 The guest image is unchanged, so the extraction marker is unchanged: this update does **not** reset
 the guest, unlike 1.0.9. `versionCode 12`, `versionName 1.0.10`.
 
+### 1.0.14 — one authoritative engine startup (the lifecycle race)
+
+Reported from a device log: `21:23:50 the engine is running but nothing is on … — asking it to start the
+agent` while the guest was still booting (its control API only answered at `21:24:03`), then a second
+`Starting the agent inside the guest` at `21:24:09`, then a stale `still waiting for the agent … (120s so
+far)` *after* `Engine ready`, and another `asking it to start the agent` at `21:26:03`.
+
+The cause was in this file. `awaitOperative` asked `manager.isRunning()`, which only means the QEMU
+**process** exists, and treated that as "the engine is up" — so a chat turn arriving during a boot
+started the agent itself while the normal startup sequence was still preparing the guest. Two competing
+`/agent/start` calls, and the second could disturb the agent the first had just brought up.
+
+Fixed by giving the engine exactly one owner:
+
+* `private val lifecycle = Mutex()` and a single tracked `startupTask: Deferred<Boolean>` with a
+  `startupOwner` label. `launchStartup()` is the only place a startup is created, it runs
+  `startupSequence()` under the lock, and it clears the task in `invokeOnCompletion` (so a failure, an
+  early return or a cancellation can never leave the controller believing a startup is running).
+* `startupSequence(app, force, owner, onProgress)` is the ordered lifecycle — VM → control API → guest
+  preparation → agent → HTTP readiness on the forwarded port — and the **only** place that starts the VM
+  or calls `/agent/start`.
+* `start()` (auto-start on launch, manual Start Engine) **joins** an in-flight startup instead of
+  launching a second one; `awaitOperative()` returns immediately when the port answers, joins a running
+  startup, and only becomes the owner when nobody else is; `restartAgent()` and `configureAgent()` wait
+  for any in-flight startup (`joinStartup`) and then hold the same lock, so a model change cannot race a
+  boot; `refresh()` refuses to overwrite state while a startup is in progress (a stale guest read used to
+  flip a READY display back to STOPPED).
+* `refresh()` also reads agent readiness from the port now instead of the guest's pidfile `running` flag.
+* New log lines make concurrent lifecycle activity visible: `startup owner: …`, `startup already in
+  progress — joining existing startup (owner: …)`, `agent readiness confirmed by HTTP on …`,
+  `startup completed successfully`, `startup failed: …`, `refresh skipped — a startup is in progress`,
+  `nothing answers on … — this startup owns the agent start`.
+
+Verified by construction and by inspection of the call graph: `startAgentFromScratch` (the only path to
+`/agent/start`) has two callers, both inside the lifecycle lock; `manager.start()` has one caller, inside
+`startupSequence`; `launchStartup` is the only `async` and its two call sites are both guarded by
+`startupTask?.isActive`. There is no test source set in this project (`app/src/test` does not exist and no
+JUnit/Robolectric dependency is declared), so no JUnit regression tests were added; the invariants are
+structural and the log lines above make any future violation visible in the app's own engine log.
+
+`versionCode 16`, `versionName 1.0.14`.
+
 ### 1.0.13 — the gateway's own lock, which is what actually left the port dark
 
 The cause of "The on-device engine did not come up in time" was not a timeout and not the app's
