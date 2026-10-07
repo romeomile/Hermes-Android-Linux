@@ -517,3 +517,36 @@ started (uptime < 10 min). Result on the rebuilt image: **ALL CHECKS PASSED**.
 - Also in this build: the control API's `/agent/status` no longer blocks its event loop while
   `hermes --version` runs (it cost 52 s and froze every other request); the version is resolved once
   in a worker thread and cached.
+
+## 1.0.10 — the device-side ports stopped colliding with the other on-device app
+
+Reported on the phone right after installing 1.0.9: the engine screen read **VM stopped**, and the
+error was **"the guest control API rejected the request"** while the agent row still said *Starting*.
+The shape of that error is the diagnosis: in the guest, `/health` needs no auth and every other route
+does, so a control API that passes the health check and refuses `/agent/status` is **not the guest
+this app started** — and the app's own QEMU is gone (`isRunning()` reads the process).
+
+Cause: this app forwarded the guest's own numbers as the *device-side* ports (7080 control, 8642
+gateway). The older on-device app's guest binds 7080/8642 too, two QEMU forwards cannot share a port
+on the phone, so the second guest fails to bind its forwards and exits — and every request from this
+app then lands on the *other* installation's guest, whose token it does not accept. The relay front
+end hit exactly this and fixed it in v0.1.8 by separating the two sets of numbers; this app now does
+the same:
+
+- `EngineStore.GUEST_CONTROL_PORT` / `GUEST_AGENT_PORT` = 7080 / 8642 — the guest's own contract,
+  what the guest's services and any in-guest command use, never changed by the app;
+- `EngineStore.CONTROL_PORT` / `AGENT_PORT` = **17080** / **18642** — the device-side forwards, and
+  the only numbers the app itself addresses (`VmApiClient`, `localEndpoint()`);
+- `VmManager.buildQemuCommand()` maps device → guest (`hostfwd=tcp::17080-:7080,18642-:8642`).
+
+Two more things the same screen exposed, both fixed in the app layer:
+
+- **A dead VM is reported at once.** While waiting for the control API the controller now checks the
+  QEMU process and fails with "the VM process exited while the guest was starting — last VM line: …"
+  instead of polling out the full 600 s and calling it a timeout (the last serial line is kept for
+  the message).
+- **No more "Stopped" next to "Starting…".** After a failure the state is rebuilt from the process
+  that is actually alive, so a component that stopped says so.
+
+The guest image is unchanged, so the extraction marker is unchanged: this update does **not** reset
+the guest, unlike 1.0.9. `versionCode 12`, `versionName 1.0.10`.

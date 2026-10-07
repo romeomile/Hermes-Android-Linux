@@ -272,12 +272,14 @@ class VmManager(private val context: Context) {
         addAll(listOf("-drive", "if=none,file=$baseImage,id=base,format=qcow2,readonly=on"))
         addAll(listOf("-drive", "if=none,file=$userImage,id=user,format=qcow2"))
         addAll(listOf("-device", "virtio-blk-pci,drive=user"))
-        // Two forwardings: the guest control API and the agent's API server, both on device loopback.
+        // Two forwardings, device port -> the guest's own port: the guest control API and the agent's
+        // API server. The device-side numbers differ from the guest's on purpose - see
+        // EngineStore.CONTROL_PORT.
         addAll(
             listOf(
                 "-netdev",
-                "user,id=net0,hostfwd=tcp::${EngineStore.CONTROL_PORT}-:${EngineStore.CONTROL_PORT}," +
-                    "hostfwd=tcp::${EngineStore.AGENT_PORT}-:${EngineStore.AGENT_PORT}"
+                "user,id=net0,hostfwd=tcp::${EngineStore.CONTROL_PORT}-:${EngineStore.GUEST_CONTROL_PORT}," +
+                    "hostfwd=tcp::${EngineStore.AGENT_PORT}-:${EngineStore.GUEST_AGENT_PORT}"
             )
         )
         addAll(listOf("-device", "virtio-net-pci,netdev=net0,romfile="))

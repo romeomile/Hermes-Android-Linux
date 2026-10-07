@@ -39,6 +39,9 @@ object EngineController {
     private var job: Job? = null
     private var managerInstance: VmManager? = null
 
+    /** Last line QEMU wrote to the serial console, quoted when the VM dies during startup. */
+    private var lastVmLine: String = ""
+
     private val _state = MutableStateFlow(EngineState())
     val state: StateFlow<EngineState> = _state.asStateFlow()
 
@@ -49,7 +52,7 @@ object EngineController {
 
     fun manager(context: Context): VmManager = managerInstance ?: synchronized(this) {
         managerInstance ?: VmManager(context.applicationContext).also { created ->
-            created.onLog = { line -> logLine(line) }
+            created.onLog = { line -> lastVmLine = line; logLine(line) }
             created.onProgress = { message -> logLine(message) }
             managerInstance = created
         }
@@ -83,13 +86,17 @@ object EngineController {
                     step("Starting the foreground service")
                     VmService.start(app)
                     step("Booting the Linux VM")
+                    logLine(
+                        "ports: device ${EngineStore.CONTROL_PORT}/${EngineStore.AGENT_PORT} " +
+                            "-> guest ${EngineStore.GUEST_CONTROL_PORT}/${EngineStore.GUEST_AGENT_PORT}"
+                    )
                     _state.value = _state.value.copy(vm = "starting")
                     manager.start()
                     _state.value = _state.value.copy(vm = "running")
                 }
 
                 step("Waiting for the guest control API")
-                if (!awaitControl(api, CONTROL_TIMEOUT_SECONDS)) {
+                if (!awaitControl(api, manager, CONTROL_TIMEOUT_SECONDS)) {
                     throw IllegalStateException("the guest control API did not answer within ${CONTROL_TIMEOUT_SECONDS}s")
                 }
                 _state.value = _state.value.copy(controlReady = true)
@@ -116,7 +123,16 @@ object EngineController {
                 }
             } catch (e: Exception) {
                 logLine("error: ${e.message}")
-                _state.value = _state.value.copy(error = e.message ?: "engine start failed")
+                // Report the state that is true after the failure instead of leaving the last
+                // progress line standing: a screen that says "stopped" and "starting" at once is
+                // how this failure used to read.
+                val alive = managerInstance?.status() == "running"
+                _state.value = _state.value.copy(
+                    error = e.message ?: "engine start failed",
+                    vm = if (alive) "running" else "stopped",
+                    controlReady = alive && _state.value.controlReady,
+                    agent = if (alive) _state.value.agent else AgentState.STOPPED
+                )
             } finally {
                 _state.value = _state.value.copy(busy = false)
             }
@@ -234,10 +250,21 @@ object EngineController {
         scope.launch { onResult(manager(app).apiClient.agentLog(lines)) }
     }
 
-    private suspend fun awaitControl(api: VmApiClient, timeoutSeconds: Int): Boolean {
+    /**
+     * Waits for the guest control API. Bails out the moment the VM process is gone: a QEMU that
+     * exited has nothing coming (its forwarding rule could not be bound, its disks were unusable),
+     * and waiting out the full timeout only turns a crash into a hang.
+     */
+    private suspend fun awaitControl(api: VmApiClient, manager: VmManager, timeoutSeconds: Int): Boolean {
         val deadline = System.currentTimeMillis() + timeoutSeconds * 1000L
         while (System.currentTimeMillis() < deadline) {
             if (api.health()) return true
+            if (!manager.isRunning()) {
+                throw IllegalStateException(
+                    "the VM process exited while the guest was starting" +
+                        (if (lastVmLine.isNotBlank()) " — last VM line: $lastVmLine" else "")
+                )
+            }
             delay(1_000)
         }
         return false

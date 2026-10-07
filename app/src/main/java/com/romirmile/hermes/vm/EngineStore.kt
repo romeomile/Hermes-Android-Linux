@@ -69,11 +69,26 @@ class EngineStore(context: Context) {
         const val MIN_DISK_GB = 10
         const val MAX_DISK_GB = 64
 
-        /** Control API inside the guest (QEMU hostfwd: device 127.0.0.1 -> guest). */
-        const val CONTROL_PORT = 7080
+        /**
+         * Ports *inside the guest*, where its own services listen. This is the guest's contract, it
+         * never changes with the app, and it is what a command run inside the guest must address.
+         */
+        const val GUEST_CONTROL_PORT = 7080
+        const val GUEST_AGENT_PORT = 8642
 
-        /** Hermes API server inside the guest. */
-        const val AGENT_PORT = 8642
+        /**
+         * Device-side ports the guest's services are forwarded onto (QEMU `hostfwd`), and the only
+         * ones the app itself may use.
+         *
+         * Deliberately NOT the guest's own numbers. The other on-device app's guest binds 7080/8642
+         * too, and two QEMU forwards cannot share a device port: the second guest fails to bind its
+         * forwards and exits, while the app keeps talking to the *other* installation's guest, whose
+         * token it does not accept. On screen that reads as the engine reporting "stopped" while the
+         * control API answers and rejects the request. The relay front end solved the same collision
+         * the same way (17080/18642/19129), so both apps can run side by side.
+         */
+        const val CONTROL_PORT = 17080
+        const val AGENT_PORT = 18642
 
         /** Loopback address a chat frontend on this device can reach the agent on. */
         fun localEndpoint(): String = "http://127.0.0.1:$AGENT_PORT"

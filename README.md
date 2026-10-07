@@ -49,20 +49,26 @@ preset** — you bring your own endpoint and key, exactly as with any other chat
 ```
    chat UI (this app)                     Linux VM (QEMU, guest kernel)
         │                                        │
-        │  HTTP  http://127.0.0.1:8642           │
+        │  HTTP  http://127.0.0.1:18642          │
         ├──────────────► device loopback ◄── SLIRP hostfwd
         │                                        │
-        │  control API  http://127.0.0.1:7080    │
+        │  control API  http://127.0.0.1:17080   │
         └──────────────► (engine state, shell, agent lifecycle)
                                                  └── Hermes Agent, policy-free userspace:
                                                      apk, pip, git, compilers, terminal
 ```
 
-| Path | Direction | Purpose |
-|---|---|---|
-| `127.0.0.1:8642` | app → guest | the agent's OpenAI-compatible API server (`/v1/...`) |
-| `127.0.0.1:7080` | app → guest | control API: health, shell, agent start/stop, agent config |
-| kernel cmdline | app → guest | the device-generated token, read by the guest at boot |
+| Path (on the device) | Direction | Guest port | Purpose |
+|---|---|---|---|
+| `127.0.0.1:17080` | app → guest | 7080 | control API: health, shell, agent start/stop, agent config |
+| `127.0.0.1:18642` | app → guest | 8642 | the agent's OpenAI-compatible API server (`/v1/...`) |
+| kernel cmdline | app → guest | — | the device-generated token, read by the guest at boot |
+
+The guest's own services listen on **7080** and **8642 inside the guest**; the app forwards them onto
+**17080** and **18642** on the device, and those are the numbers anything on the phone must use. The
+device-side numbers are deliberately not the guest's: the other on-device Hermes app's guest binds
+7080/8642 as well, two QEMU forwards cannot share a port, and the loser fails to bind its forwards and
+exits while the app goes on talking to the *other* installation's guest — which rejects its token.
 
 The token is created on the device at first launch, kept in app-private storage, and used both for
 the control API and as the agent's `API_SERVER_KEY`. It is never baked into the image. No credential,
