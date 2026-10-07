@@ -18,7 +18,6 @@ import com.romirmile.hermes.data.AppSettings
 import com.romirmile.hermes.data.AgentSetup
 import com.romirmile.hermes.data.AgentTtsConfig
 import com.romirmile.hermes.data.ChatStore
-import com.romirmile.hermes.data.ChatterboxVoice
 import com.romirmile.hermes.vm.EngineController
 import com.romirmile.hermes.vm.EngineStore
 import java.io.File
@@ -292,93 +291,6 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
             _agentSetupStatus.value = reply.ifBlank {
                 context.getString(R.string.agent_setup_no_reply)
             }
-        }
-    }
-
-    // ---- on-device speech model pack (Chatterbox) ------------------------------------------
-
-    private val _chatterboxInstalled = MutableStateFlow(ChatterboxVoice.modelsInstalled(context))
-    val chatterboxInstalled: StateFlow<Boolean> = _chatterboxInstalled.asStateFlow()
-
-    /** null while idle, otherwise the copy progress in per cent. */
-    private val _chatterboxProgress = MutableStateFlow<Int?>(null)
-    val chatterboxProgress: StateFlow<Int?> = _chatterboxProgress.asStateFlow()
-
-    private val _chatterboxStatus = MutableStateFlow<String?>(null)
-    val chatterboxStatus: StateFlow<String?> = _chatterboxStatus.asStateFlow()
-
-    /**
-     * Copies the Chatterbox weights out of the APK into app storage (see [ChatterboxVoice]) — the
-     * one-time step that turns the bundled engine into a working voice, with a visible percentage
-     * because the pack is about a gigabyte.
-     */
-    fun installChatterboxPack() {
-        if (_chatterboxProgress.value != null) return
-        viewModelScope.launch {
-            _chatterboxProgress.value = 0
-            _chatterboxStatus.value = context.getString(R.string.chatterbox_pack_installing, 0)
-            val result = runCatching {
-                ChatterboxVoice.installModelPack(context) { percent ->
-                    _chatterboxProgress.value = percent
-                    _chatterboxStatus.value = context.getString(R.string.chatterbox_pack_installing, percent)
-                }
-            }
-            _chatterboxProgress.value = null
-            _chatterboxInstalled.value = ChatterboxVoice.modelsInstalled(context)
-            _chatterboxStatus.value = result.fold(
-                onSuccess = { context.getString(R.string.chatterbox_pack_installed) },
-                onFailure = { error ->
-                    context.getString(R.string.chatterbox_pack_failed, error.message.orEmpty())
-                }
-            )
-        }
-    }
-
-    // ---- on-device speech self-test ---------------------------------------------------------
-
-    private val _chatterboxTestStatus = MutableStateFlow<String?>(null)
-    val chatterboxTestStatus: StateFlow<String?> = _chatterboxTestStatus.asStateFlow()
-
-    /** Absolute path of the last test clip, so the screen can play what the engine produced. */
-    private val _chatterboxTestFile = MutableStateFlow<String?>(null)
-    val chatterboxTestFile: StateFlow<String?> = _chatterboxTestFile.asStateFlow()
-
-    /**
-     * Synthesizes one fixed phrase with the on-device engine and reports what happened — the only
-     * way to tell an engine problem from an agent/network problem, since the voice screen only ever
-     * speaks replies that arrived from somewhere else.
-     */
-    fun testChatterboxVoice() {
-        if (_chatterboxProgress.value != null) return
-        viewModelScope.launch {
-            _chatterboxTestFile.value = null
-            _chatterboxTestStatus.value = context.getString(R.string.chatterbox_test_running)
-            val phrase = context.getString(R.string.chatterbox_test_phrase)
-            val started = System.currentTimeMillis()
-            val result = runCatching {
-                withContext(Dispatchers.IO) { ChatterboxVoice.synthesize(context, phrase) }
-            }
-            val elapsed = (System.currentTimeMillis() - started) / 1000.0
-            _chatterboxTestStatus.value = result.fold(
-                onSuccess = { bytes ->
-                    val file = File(context.cacheDir, "chatterbox-test.wav")
-                    file.writeBytes(bytes)
-                    _chatterboxTestFile.value = file.absolutePath
-                    val seconds = (bytes.size - 44).coerceAtLeast(0) / (24_000.0 * 2.0)
-                    val peak = ChatterboxVoice.peakAmplitude(bytes)
-                    if (peak < 0.01f) {
-                        context.getString(R.string.chatterbox_test_silent, seconds, peak)
-                    } else {
-                        context.getString(R.string.chatterbox_test_ok, seconds, elapsed)
-                    }
-                },
-                onFailure = { error ->
-                    context.getString(
-                        R.string.chatterbox_test_failed,
-                        error.message ?: error.javaClass.simpleName
-                    )
-                }
-            )
         }
     }
 

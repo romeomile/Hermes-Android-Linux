@@ -551,6 +551,41 @@ Two more things the same screen exposed, both fixed in the app layer:
 The guest image is unchanged, so the extraction marker is unchanged: this update does **not** reset
 the guest, unlike 1.0.9. `versionCode 12`, `versionName 1.0.10`.
 
+### 1.1.0 — Chatterbox removed (the 1.7 GB bundle is now 217 MB)
+
+The on-device speech engine is gone: its weight pack was 1.55 GB of the 1.78 GB APK, and the voice
+options that remain (the phone engine, the agent's own TTS, and a user-supplied speech endpoint) cover
+the same ground without bundling a model.
+
+Removed, in full:
+
+* `app/src/main/assets/chatterbox/` — `cbx-s3gen-turbo-f16.gguf` (1.06 GB) and `cbx-t3-turbo-q8.gguf`
+  (0.49 GB).
+* `app/src/main/jniLibs/arm64-v8a/libchatterbox.so` — the native engine (1.8 MB).
+* `app/src/main/java/com/romirmile/hermes/data/ChatterboxVoice.kt` — the whole client (model install,
+  synthesis, amplitude checks, native bridge).
+* `chatterbox/` — the engine's build tree: `CMakeLists.txt`, `build_libchatterbox_android.sh`,
+  `build_model_pack.sh`, `jni/chatterbox_jni.cpp`.
+* The `SpeechEngine.CHATTERBOX` value (the enum is now `PHONE, AGENT, OWN`; a preference still holding
+  `CHATTERBOX` falls back to `PHONE` through the existing `runCatching`/`getOrDefault`).
+* The ViewModel's pack section (state flows, `installChatterboxPack()`, `testChatterboxVoice()`), the
+  Settings screen's CHATTERBOX block (pack install, progress, test button) and its engine label, the
+  voice screen's local-engine path (`speakWithChatterbox`, its chunk size, state flags, `speak()`
+  branch and cancel call), the `playOnce` helper that only the voice test used, 18 Chatterbox strings,
+  the ProGuard keep rule for the removed native class, the `gguf` no-compress entry and its comment,
+  the model-pack entries in `.gitignore`, and both Chatterbox attributions in `NOTICE.md`.
+
+Kept: every other speech path (`PHONE`, `AGENT`, `OWN`), `VoiceScreen`, `VoiceConfigClient`,
+`SpeechCatalogue`, `AgentTtsConfig`, the microphone permission and the audio playback code. Chat,
+engine lifecycle, guest image, QEMU networking and provider configuration are untouched — the diff
+touches voice files only.
+
+The guest image never contained a Chatterbox component (`image/` has no reference to it), so this
+needed **no image rebuild**: the guest is unchanged, the extraction marker is unchanged, and installing
+this update resets nobody's disk.
+
+`versionCode 19`, `versionName 1.1.0`.
+
 ### 1.0.15 — the readiness loop: `startStream` called itself
 
 Reported from the device: `Engine ready` → `startup completed successfully` → `no startup in progress —

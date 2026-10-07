@@ -20,8 +20,6 @@ rewritten around the agent lifecycle.
 | Alpine Linux | MIT and others | Guest root filesystem (Alpine 3.19) |
 | Linux kernel (`vmlinuz-virt`, `initramfs-virt`) | GPLv2 | Guest kernel, unmodified Alpine build |
 | Hermes Agent | see upstream | Installed inside the guest image (https://github.com/NousResearch/hermes-agent) |
-| Chatterbox TTS (ggml port) | MIT | Speech engine **linked into the app** as `libchatterbox.so` (`tts-cpp` + `ggml`, C++/ggml, no Python/PyTorch at runtime). Port: https://github.com/gianni-cor/chatterbox.cpp (commit `ddca05fb69c2910b0d7b5eae420d360ed98c067b`), ggml: https://github.com/ggml-org/ggml |
-| Chatterbox model weights | MIT | Converted to GGUF for the app from https://huggingface.co/ResembleAI/chatterbox-turbo, and shipped inside the APK's assets. Original model: https://github.com/resemble-ai/chatterbox (Copyright (c) 2025 Resemble AI) |
 
 GPLv2 (QEMU, Linux): the binaries are redistributed unmodified and are invoked
 as separate programs, so this project's own source is not derived from them.

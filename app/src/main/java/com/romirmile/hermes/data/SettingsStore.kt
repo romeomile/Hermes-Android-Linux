@@ -11,7 +11,7 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK }
  * provider the user configures in the app itself (their own endpoint and key), which needs no
  * agent-side support at all.
  */
-enum class SpeechEngine { PHONE, CHATTERBOX, AGENT, OWN }
+enum class SpeechEngine { PHONE, AGENT, OWN }
 
 data class AppSettings(
     val endpoint: String = "",

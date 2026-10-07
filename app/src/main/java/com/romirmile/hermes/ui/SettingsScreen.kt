@@ -84,11 +84,6 @@ fun SettingsScreen(vm: HermesViewModel, onBack: () -> Unit) {
     var speechModel by remember { mutableStateOf(settings.speechModel) }
     var speechVoice by remember { mutableStateOf(settings.speechVoice) }
     val voiceStatus by vm.voiceStatus.collectAsState()
-    val chatterboxInstalled by vm.chatterboxInstalled.collectAsState()
-    val chatterboxProgress by vm.chatterboxProgress.collectAsState()
-    val chatterboxStatus by vm.chatterboxStatus.collectAsState()
-    val chatterboxTestStatus by vm.chatterboxTestStatus.collectAsState()
-    val chatterboxTestFile by vm.chatterboxTestFile.collectAsState()
     val speechModels by vm.speechModels.collectAsState()
     val agentSetupStatus by vm.agentSetupStatus.collectAsState()
     val agentSetupRunning by vm.agentSetupRunning.collectAsState()
@@ -302,71 +297,6 @@ fun SettingsScreen(vm: HermesViewModel, onBack: () -> Unit) {
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-
-            if (settings.speechEngine == SpeechEngine.CHATTERBOX) {
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    stringResource(R.string.settings_chatterbox_support),
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(8.dp))
-                val progress = chatterboxProgress
-                if (progress != null) {
-                    LinearProgressIndicator(
-                        progress = { progress / 100f },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        stringResource(R.string.chatterbox_pack_installing, progress),
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
-                    Text(
-                        stringResource(
-                            if (chatterboxInstalled) R.string.chatterbox_pack_ready
-                            else R.string.chatterbox_pack_missing
-                        ),
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(onClick = { vm.installChatterboxPack() }) {
-                        Text(
-                            stringResource(
-                                if (chatterboxInstalled) R.string.chatterbox_pack_reinstall
-                                else R.string.chatterbox_pack_install
-                            ),
-                            fontSize = 13.sp
-                        )
-                    }
-                    chatterboxStatus?.let { status ->
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            status,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(onClick = { vm.testChatterboxVoice() }) {
-                        Text(stringResource(R.string.chatterbox_test_button), fontSize = 13.sp)
-                    }
-                    chatterboxTestStatus?.let { status ->
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            status,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    LaunchedEffect(chatterboxTestFile) {
-                        chatterboxTestFile?.let { path -> playOnce(context, path) }
-                    }
-                }
-            }
 
             if (settings.speechEngine == SpeechEngine.AGENT) {
                 Spacer(Modifier.height(12.dp))
@@ -713,31 +643,10 @@ private fun themeLabel(mode: ThemeMode): String = stringResource(
 private fun engineLabel(engine: SpeechEngine): String = stringResource(
     when (engine) {
         SpeechEngine.PHONE -> R.string.speech_engine_phone
-        SpeechEngine.CHATTERBOX -> R.string.speech_engine_chatterbox
         SpeechEngine.AGENT -> R.string.speech_engine_agent
         SpeechEngine.OWN -> R.string.speech_engine_own
     }
 )
-
-/**
- * Plays one short clip and releases the player. Used by the on-device voice test: the engine writes
- * a wav, this is the only listener, so nothing keeps a MediaPlayer around afterwards.
- */
-private fun playOnce(context: Context, path: String) {
-    runCatching {
-        val player = MediaPlayer()
-        player.setDataSource(path)
-        player.setOnCompletionListener { finished ->
-            runCatching { finished.release() }
-        }
-        player.setOnErrorListener { failed, _, _ ->
-            runCatching { failed.release() }
-            true
-        }
-        player.prepare()
-        player.start()
-    }
-}
 
 /** "Deepgram Flux TTS (deepgram/flux-tts:free) — Free" or "… — $0.015 per 1k characters". */
 @Composable
