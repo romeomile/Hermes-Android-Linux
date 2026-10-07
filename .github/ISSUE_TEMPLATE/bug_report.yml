@@ -1,0 +1,65 @@
+name: Bug report
+description: Something does not work on your device
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Device details decide most of these — please fill
+        them in rather than describing the symptom alone.
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: e.g. Pixel 7a, Android 14
+    validations:
+      required: true
+  - type: input
+    id: soc
+    attributes:
+      label: SoC and RAM
+      placeholder: e.g. Tensor G2, 8 GB
+    validations:
+      required: true
+  - type: input
+    id: release
+    attributes:
+      label: App version / release tag
+      placeholder: e.g. 1.0.8 (v1.0.8)
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where does it fail?
+      description: The startup order matters — pick the earliest stage that is wrong.
+      options:
+        - Install / extraction of the guest disk
+        - The engine never starts (QEMU)
+        - The engine starts but the agent never comes up
+        - Chat opens but replies never arrive
+        - Chat works, something else is wrong
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Engine log / guest shell output
+      description: The engine screen has a log tab; the guest shell is also reachable from the app.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before posting
+      options:
+        - label: I searched existing issues for the same symptom
+          required: true
+        - label: This is an arm64 device (only arm64-v8a QEMU binaries ship)
+          required: true

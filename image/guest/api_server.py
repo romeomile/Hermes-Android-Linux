@@ -12,6 +12,7 @@ kernel command line (api_token=...). Nothing is baked into the image.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import socket
@@ -102,15 +103,30 @@ def agent_running() -> bool:
     return port_open(AGENT_PORT)
 
 
+_AGENT_VERSION_CACHE = None  # str once resolved
+
+
 def agent_version() -> str:
+    """`hermes --version`, cached for the process lifetime.
+
+    It imports the whole agent, which takes tens of seconds on a phone, so it must never be called
+    directly from an async handler: the blocking run freezes the control API's only event loop and every
+    other request with it (measured: 52 s for /agent/status, with concurrent /health never answering).
+    Call it through asyncio.to_thread and keep the result.
+    """
+    global _AGENT_VERSION_CACHE
+    if _AGENT_VERSION_CACHE is not None:
+        return _AGENT_VERSION_CACHE
     if not Path(HERMES_BIN).exists():
+        _AGENT_VERSION_CACHE = ""
         return ""
     try:
         out = subprocess.run([HERMES_BIN, "--version"], capture_output=True,
                              text=True, timeout=180)
-        return (out.stdout or out.stderr).strip().splitlines()[0]
+        _AGENT_VERSION_CACHE = (out.stdout or out.stderr).strip().splitlines()[0]
     except Exception:
-        return ""
+        _AGENT_VERSION_CACHE = ""
+    return _AGENT_VERSION_CACHE
 
 
 def run_sh(cmd: str, timeout: int = 60) -> dict:
@@ -167,7 +183,7 @@ async def agent_status() -> dict:
     return {"installed": installed, "running": agent_running(),
             "port": AGENT_PORT, "home": str(HERMES_HOME),
             "pid": agent_pid(),
-            "version": agent_version() if installed else ""}
+            "version": (await asyncio.to_thread(agent_version)) if installed else ""}
 
 
 @app.post("/agent/start", dependencies=[Depends(require_auth)])

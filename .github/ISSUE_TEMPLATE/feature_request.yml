@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest a capability or an improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the situation you are in, not only the feature you want.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Chat UI
+        - Engine / VM (start, stop, resources, log, shell)
+        - Guest image (packages, size, boot)
+        - Voice / speech on device
+        - Build and tooling
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: offer
+    attributes:
+      label: Are you offering to work on it?
+      options:
+        - label: I would like to implement this myself

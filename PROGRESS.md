@@ -6,9 +6,9 @@ One app that both **chats with Hermes** and **hosts Hermes locally**: a QEMU-acc
 (Alpine) runs inside the app with Hermes preinstalled, and the app's own chat UI talks to the agent's
 API server over device loopback. No root, no Termux, no PC, no server to rent.
 
-- Repo: `romeomile/Hermes-Android-Linux` (private)
+- Repo: `romeomile/Hermes-Android-Linux` (**public** since 2026-10-07)
 - Package: `com.romirmile.hermeslinux` (deliberately different from the other Hermes app, so both can
-  be installed side by side), namespace `com.romirmile.hermes`, versionCode **1**, versionName **1.0.0**
+  be installed side by side), namespace `com.romirmile.hermes`, versionCode **11**, versionName **1.0.9**
 - minSdk 26, target/compile 35, **arm64-v8a only** (the QEMU binaries are arm64)
 
 ## Layout
@@ -477,3 +477,43 @@ claiming a voice works.** The clip sent to Romeo before this was found was silen
 
 Release: `1.0.8` (`versionCode 10`), full pack inside (~1.8 GB), latest. The broken `1.0.7` release
 was deleted once 1.0.8 was verified.
+
+## 1.0.9 — the shipped image no longer names the build host, and persistence is a tested contract
+
+The repository went public on 2026-10-07, which is when the artifact audit that found this started:
+**every published image from 1.0.1 on carried the build host's tree inside it** — 5,081 distinct
+paths (`…/rootfs/usr/lib/python3.11/site-packages/…`), all of them `co_filename` strings in the
+Python bytecode of the guest's own site-packages. Cause: `image/build_guest_image.sh` byte-compiled
+the guest's Python **on the host**, so each `.pyc` recorded the host path it was compiled from. Fix:
+compile inside the chroot (the recorded path is then the guest's own `/usr/lib/python3.11/…`), and
+**fail the build** if any build-host path survives the tree — the same guard style the native library
+build already used. Verified after the rebuild: 5,081 → **0** occurrences in the packed image, with
+the build's own guard passing.
+
+Also verified while auditing: no credential from the build machine appears in the tree, history, the
+APK or the guest disk (all values from the machine's own env files searched as literals, plus
+key-shaped patterns). The only machine values in the guest disk are upstream defaults the local
+`.env` happens to hold (`api.deepseek.com`, the OpenViking endpoint, the Modal terminal image) plus
+`Europe/Moscow` from Alpine's tzdata.
+
+**Persistence is now a documented, tested contract** instead of an implied one. `VmManager` reuses
+the overlay and only ever grows it, so a normal stop/start and an Android force-stop keep everything;
+an update that ships a new base image starts a **fresh** overlay and sets the old one aside as
+`vm/user.qcow2.previous` (newest only) — the guest the user sees comes back empty, and the previous
+disk is not bootable without the base image of its own release. The README's "your data on the
+overlay is kept" was wrong and is gone.
+
+New: `image/test_guest_persistence.sh` (host-side, no phone) proves the contract — canaries written
+in the guest, then five phases: fresh overlay, normal stop/start (canaries present), SIGKILL
+force-stop (present), image update (absent, previous disk kept), restore (present again). It mirrors
+`VmManager.buildQemuCommand()`/`createUserImage()` verbatim and guards against the trap that made a
+first attempt invalid: a stale guest from an earlier experiment held the port, answered `/health` and
+silently ate the canaries. The port must be free, and every boot must prove it is the guest just
+started (uptime < 10 min). Result on the rebuilt image: **ALL CHECKS PASSED**.
+
+- `versionCode 11`, `versionName 1.0.9`; the shipped APK's guest image is the verified one.
+- The image marker is the packed `.gz` hash, so installing this build re-extracts and **starts a
+  fresh guest** (the previous disk is kept as `vm/user.qcow2.previous`) — expected, not a bug.
+- Also in this build: the control API's `/agent/status` no longer blocks its event loop while
+  `hermes --version` runs (it cost 52 s and froze every other request); the version is resolved once
+  in a worker thread and cached.
