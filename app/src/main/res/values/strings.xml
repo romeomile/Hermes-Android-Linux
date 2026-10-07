@@ -69,6 +69,8 @@
     <string name="error_host_unreachable">Can’t reach the gateway. Check the URL in Settings and your network.</string>
     <string name="error_offline">You’re offline. Connect to a network and send again.</string>
     <string name="notice_reconnecting">Connection lost — reconnecting…</string>
+    <string name="notice_engine_warming">Starting the on-device engine — %1$d s</string>
+    <string name="error_engine_not_ready">The on-device engine did not come up in time. Open the Engine screen to see where it stopped.</string>
     <string name="error_send_failed">Couldn’t send this message. Please try again.</string>
     <string name="voice_title">Voice</string>
     <string name="voice_listening">Listening…</string>

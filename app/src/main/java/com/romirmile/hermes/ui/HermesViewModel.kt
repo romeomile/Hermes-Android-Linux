@@ -19,6 +19,8 @@ import com.romirmile.hermes.data.AgentSetup
 import com.romirmile.hermes.data.AgentTtsConfig
 import com.romirmile.hermes.data.ChatStore
 import com.romirmile.hermes.data.ChatterboxVoice
+import com.romirmile.hermes.vm.EngineController
+import com.romirmile.hermes.vm.EngineStore
 import java.io.File
 import com.romirmile.hermes.data.CompletionNotifier
 import com.romirmile.hermes.data.GatewayAdmin
@@ -613,6 +615,28 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
         if (!isOnline()) {
             appendError(sessionId, context.getString(R.string.error_offline))
             persist()
+            return
+        }
+
+        // The engine runs on this device and a cold guest needs minutes before its gateway binds, so a
+        // turn sent into that window must wait for the port instead of dying on it. Warm, this check
+        // costs one loopback request and the turn goes straight through.
+        if (config.endpoint.trimEnd('/') == EngineStore.localEndpoint() && !EngineController.isOperative()) {
+            job = viewModelScope.launch {
+                _sending.value = true
+                val ready = EngineController.awaitOperative(context) { waited ->
+                    _userNotice.value = context.getString(R.string.notice_engine_warming, waited)
+                }
+                _userNotice.value = null
+                _sending.value = false
+                job = null
+                if (ready) {
+                    startStream(sessionId)
+                } else {
+                    appendError(sessionId, context.getString(R.string.error_engine_not_ready))
+                    persist()
+                }
+            }
             return
         }
 

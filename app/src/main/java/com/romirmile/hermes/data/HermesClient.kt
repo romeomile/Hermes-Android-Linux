@@ -77,10 +77,11 @@ class HermesClient {
         val conn = (URL(chatUrl(baseUrl)).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 20_000
-            // Keepalives measured on a booted guest: one `: keepalive` every ~30 s while the agent
-            // prepares a turn, so a stall well past three intervals means the socket really is dead.
-            // (A cold turn under emulation needs minutes before its first token.)
-            readTimeout = 120_000
+            // No read timeout on purpose: this is one long-lived streaming response from an agent that
+            // runs under QEMU emulation, and a cold turn legitimately takes minutes before its first
+            // byte. A finite timeout here abandons a live request and reports it as a dropped
+            // connection. Calling stop() (which disconnects the connection) is how a turn is cancelled.
+            readTimeout = 0
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             setRequestProperty("Accept", "text/event-stream")

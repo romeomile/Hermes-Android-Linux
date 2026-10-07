@@ -550,3 +550,60 @@ Two more things the same screen exposed, both fixed in the app layer:
 
 The guest image is unchanged, so the extraction marker is unchanged: this update does **not** reset
 the guest, unlike 1.0.9. `versionCode 12`, `versionName 1.0.10`.
+
+## 1.0.11 — readiness is the port, not the guest's opinion
+
+Reported after 1.0.10: the chat opened, the first message was answered with **"Connection lost —
+reconnecting…" immediately**, and the engine screen looked healthy. With the port split in place the
+turn now reaches the forwarded agent port — and that is exactly where the fault showed up.
+
+Reproduced on the host with the shipped image and the app's own forwards: the control API answered
+`/agent/status` with `{"running": true, "pid": 1494, "version": "Hermes Agent v0.21.3"}`, while
+`wget 127.0.0.1:8642` **inside the guest** was refused and every connection to the forwarded port was
+reset instantly. The status was a claim, not evidence — this repo's `agent_running()` was
+`os.kill(pid, 0)` on the pidfile first, and only probed the port if the pid was gone:
+
+```python
+def agent_running() -> bool:
+    pid = agent_pid()
+    if pid:
+        os.kill(pid, 0); return True      # "the pid exists" == "the agent is running"
+```
+
+Guest pids are reused within minutes, so a dead agent's pidfile keeps reporting a live agent. That
+also made `/agent/start` a silent no-op (`start_agent.sh` exits early on a live pid), so the app sat
+on a claim that could never become true while the port stayed dark — the relay front end documented
+the same three failure modes (`FORK-NOTES.md`, v0.1.9) and solved them the same way.
+
+The app now owns readiness, in the order the relay uses:
+
+1. wait on the control API (it answers as soon as the guest itself is up, and needs no auth);
+2. **read the key the guest really holds** (`grep '^API_SERVER_KEY=' /root/.hermes/.env`, the literal
+   value, since a printed one is not evidence) and rewrite `.env` + `config.yaml` through
+   `/agent/config` only when it is missing, short (the gateway exits on a key under 16 characters) or
+   not the device's token;
+3. **clear `/var/run/hermes-agent.pid` only when the agent's port is closed**, then start the agent —
+   never trusting its "started" answer;
+4. **wait for the forwarded agent port itself** (`GET http://127.0.0.1:18642/v1/models`, any HTTP
+   status counts as "listening") for up to twenty minutes, reporting the elapsed time every minute;
+5. on failure, quote the guest's own agent log in the error instead of a bare timeout.
+
+Guest-side sources carry the same correction (`agent_running()` probes the port first, and
+`/agent/start` clears a stale pidfile), so a future image is honest on its own; the shipped image is
+unchanged, which keeps this update from resetting anyone's guest. `versionCode 13`, `versionName
+1.0.11`.
+
+### The streaming read timeout was the other half of the same symptom
+
+`HermesClient.streamChat()` set a **120 s read timeout** on what is one long-lived streaming response.
+Under emulation a cold turn legitimately takes longer than that before its first byte, so the client
+abandoned a live request and reported it as a dropped connection — the same user-visible error as the
+dark port above, from a completely different cause. A finite read timeout is simply the wrong
+semantics here: `readTimeout = 0` leaves the stream open indefinitely, `connectTimeout = 20_000` still
+bounds connection establishment, and `stop()` (`active?.disconnect()`) remains the only way a turn
+ends early. `failureKind()` keeps `SocketTimeoutException` → `TIMEOUT` and a reset/abort →
+`CONNECTION_LOST`, so the two are still reported differently.
+
+The reasoning carried over from the 1.0.7 measurement, where keepalives every ~30 s made 120 s look
+generous: that measurement was of a *healthy* guest. A guest whose gateway is still starting emits
+nothing at all, which is exactly when the client must wait rather than give up.

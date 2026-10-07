@@ -33,6 +33,26 @@ class VmApiClient(private val token: String) {
         false
     }
 
+    /**
+     * True when the agent's API port answers at all — any HTTP status counts, because even a 401 means
+     * something is listening there. This, and not the guest's own "running" flag, is the readiness
+     * evidence: that flag is `kill -0` on a pidfile and guest pids are reused, so it can read true
+     * while nothing is bound to the port.
+     */
+    fun agentApiAnswers(timeoutMs: Int = 5_000): Boolean = try {
+        val connection =
+            (URL("${EngineStore.localEndpoint()}/v1/models").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = timeoutMs
+                readTimeout = timeoutMs
+                setRequestProperty("Authorization", "Bearer $token")
+            }
+        connection.responseCode
+        true
+    } catch (_: Exception) {
+        false
+    }
+
     fun agentStatus(): AgentStatus? = try {
         val json = JSONObject(request("GET", "/agent/status", null, 120_000))
         AgentStatus(

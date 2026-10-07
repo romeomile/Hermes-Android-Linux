@@ -127,6 +127,10 @@ class VmManager(private val context: Context) {
 
     fun vmExec(cmd: String, timeoutSeconds: Int = 60) = apiClient.vmExec(cmd, timeoutSeconds)
 
+    /** Runs a command inside the guest and returns its stdout: diagnostics and repairs. */
+    fun exec(cmd: String, timeoutSeconds: Int = 60): String =
+        runCatching { vmExec(cmd, timeoutSeconds).stdout.trim() }.getOrDefault("")
+
     private fun report(message: String) {
         Log.d(TAG, message)
         onProgress?.invoke(message)

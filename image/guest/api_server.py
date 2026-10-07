@@ -93,14 +93,21 @@ def agent_pid() -> int:
 
 
 def agent_running() -> bool:
+    """True only when the agent's API port is actually served.
+
+    The pidfile is not evidence on its own: guest pids are reused, so `kill -0` on a recycled pid
+    reports an agent that exited long ago. That made `/agent/start` a silent no-op and let a client's
+    readiness check pass while nothing was bound to 8642 - the port decides.
+    """
+    if port_open(AGENT_PORT):
+        return True
     pid = agent_pid()
     if pid:
         try:
             os.kill(pid, 0)
-            return True
         except OSError:
             pass
-    return port_open(AGENT_PORT)
+    return False
 
 
 _AGENT_VERSION_CACHE = None  # str once resolved
@@ -192,6 +199,13 @@ async def agent_start() -> dict:
         raise HTTPException(status_code=500, detail="Hermes is not installed in the guest")
     if agent_running():
         return {"ok": True, "started": False}
+    # start_agent.sh exits early while the pid in the pidfile is alive, and guest pids are reused:
+    # a stale file would make this call a silent no-op. The file is only cleared when the port is
+    # closed, which `agent_running()` has just established.
+    try:
+        AGENT_PID.unlink()
+    except OSError:
+        pass
     proc = subprocess.run(["/bin/sh", str(START_AGENT)], capture_output=True,
                           text=True, timeout=120)
     deadline = time.time() + 240

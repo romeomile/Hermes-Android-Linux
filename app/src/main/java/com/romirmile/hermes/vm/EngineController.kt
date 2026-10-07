@@ -65,6 +65,39 @@ object EngineController {
 
     fun endpoint(): String = EngineStore.localEndpoint()
 
+    /** True when the agent's API is answering on the port the chat itself uses. */
+    fun isOperative(): Boolean = managerInstance?.apiClient?.agentApiAnswers(2_000) == true
+
+    /**
+     * Waits until the agent answers on the port the chat uses, starting the engine if it is not up.
+     *
+     * A cold guest needs minutes before its gateway binds, and a turn sent into that window used to
+     * die with "connection lost". Waiting here keeps the turn instead: it is sent the moment the port
+     * answers. [onProgress] receives the elapsed seconds so the UI can say what it is waiting for.
+     */
+    suspend fun awaitOperative(
+        context: Context,
+        timeoutSeconds: Int = OPERATIVE_TIMEOUT_SECONDS,
+        onProgress: (Int) -> Unit = {}
+    ): Boolean {
+        val app = context.applicationContext
+        val manager = manager(app)
+        if (manager.apiClient.agentApiAnswers(2_000)) return true
+        if (!manager.isRunning()) start(app)
+        val deadline = System.currentTimeMillis() + timeoutSeconds * 1000L
+        var reported = -1
+        while (System.currentTimeMillis() < deadline) {
+            if (manager.apiClient.agentApiAnswers(2_000)) return true
+            val waited = ((System.currentTimeMillis() - (deadline - timeoutSeconds * 1000L)) / 1000L).toInt()
+            if (waited != reported && waited % 5 == 0) {
+                reported = waited
+                onProgress(waited)
+            }
+            delay(2_000)
+        }
+        return false
+    }
+
     fun token(context: Context): String = EngineStore(context.applicationContext).token
 
     /**
@@ -101,26 +134,37 @@ object EngineController {
                 }
                 _state.value = _state.value.copy(controlReady = true)
 
-                step("Starting the agent inside the guest")
+                step("Preparing the guest")
                 _state.value = _state.value.copy(agent = AgentState.STARTING)
-                var status = api.agentStatus()
+                val status = api.agentStatus()
                 if (status == null) throw IllegalStateException("the guest control API rejected the request")
                 if (!status.installed) throw IllegalStateException("Hermes is not installed in the guest image")
-                if (!status.running) {
-                    if (!api.startAgent()) logLine("agent start reported a failure — check the log below")
-                }
+                ensureGuestKey(api, manager)
 
-                val ready = awaitAgent(api, AGENT_TIMEOUT_SECONDS)
+                // The guest's own readiness answer is a claim, not evidence: its `agent_running()` is
+                // `kill -0` on a pidfile and guest pids get reused, so it reports an agent that is
+                // alive as a process while nothing is bound to the port. The port the chat itself uses
+                // is the only thing accepted here.
+                var ready = api.agentApiAnswers()
+                if (!ready) {
+                    step("Starting the agent inside the guest")
+                    startAgentFromScratch(api, manager)
+                    ready = awaitAgentPort(api, AGENT_TIMEOUT_SECONDS)
+                    if (!ready) {
+                        throw IllegalStateException(
+                            "the agent never answered on ${EngineStore.localEndpoint()} within " +
+                                "${AGENT_TIMEOUT_SECONDS}s — guest agent log: ${agentLogTail(api)}"
+                        )
+                    }
+                }
                 val finalStatus = api.agentStatus()
                 _state.value = _state.value.copy(
-                    agent = if (ready) AgentState.READY else AgentState.FAILED,
+                    agent = AgentState.READY,
                     agentVersion = finalStatus?.version ?: "",
-                    error = if (ready) null else "the agent did not become ready within ${AGENT_TIMEOUT_SECONDS}s"
+                    error = null
                 )
-                if (ready) {
-                    logLine("agent ready on ${EngineStore.localEndpoint()}")
-                    step("Engine ready")
-                }
+                logLine("agent ready on ${EngineStore.localEndpoint()} (the port answered)")
+                step("Engine ready")
             } catch (e: Exception) {
                 logLine("error: ${e.message}")
                 // Report the state that is true after the failure instead of leaving the last
@@ -180,17 +224,18 @@ object EngineController {
         val app = context.applicationContext
         scope.launch {
             _state.value = _state.value.copy(busy = true, agent = AgentState.STARTING)
-            val api = manager(app).apiClient
+            val manager = manager(app)
+            val api = manager.apiClient
             api.stopAgent()
-            val started = api.startAgent()
-            val ready = awaitAgent(api, AGENT_TIMEOUT_SECONDS)
+            startAgentFromScratch(api, manager)
+            val ready = awaitAgentPort(api, AGENT_TIMEOUT_SECONDS)
             _state.value = _state.value.copy(
                 busy = false,
                 agent = if (ready) AgentState.READY else AgentState.FAILED,
                 error = if (ready) null else "the agent did not come back within ${AGENT_TIMEOUT_SECONDS}s"
             )
             logLine(if (ready) "agent restarted" else "agent restart reported a failure")
-            onDone(ready && started || ready)
+            onDone(ready)
         }
     }
 
@@ -270,14 +315,66 @@ object EngineController {
         return false
     }
 
-    private suspend fun awaitAgent(api: VmApiClient, timeoutSeconds: Int): Boolean {
+    /**
+     * The gateway refuses a missing, placeholder or sub-16-character `API_SERVER_KEY` and then exits
+     * quietly, leaving nothing on its port, so the key the guest holds has to be one it accepts. Only
+     * rewritten when it is actually wrong: the app's own token is a 36-character UUID.
+     */
+    private fun ensureGuestKey(api: VmApiClient, manager: VmManager) {
+        val key = manager.exec("grep -h '^API_SERVER_KEY=' /root/.hermes/.env 2>/dev/null | tail -1 | cut -d= -f2-")
+        if (key.length >= 16 && key == manager.token) return
+        logLine(if (key.isEmpty()) "no key in the guest — writing the device key" else "the guest key is not the device key — rewriting it")
+        val ok = api.configureAgent(
+            env = mapOf("API_SERVER_KEY" to manager.token),
+            settings = mapOf(
+                "platforms.api_server.extra.host" to "0.0.0.0",
+                "platforms.api_server.extra.port" to EngineStore.GUEST_AGENT_PORT.toString(),
+                "platforms.api_server.extra.key" to manager.token
+            )
+        )
+        if (!ok) logLine("the guest did not confirm the key rewrite — continuing and letting the port decide")
+    }
+
+    /**
+     * Clear the pidfile the guest trusts, then ask it to start the agent. `start_agent.sh` exits early
+     * while the pid in `/var/run/hermes-agent.pid` is alive and guest pids are reused, so a stale file
+     * turns every later start into a silent no-op — the file is only removed here when the port is
+     * closed, which is the caller's condition for being in this path at all.
+     */
+    private fun startAgentFromScratch(api: VmApiClient, manager: VmManager) {
+        manager.exec("rm -f /var/run/hermes-agent.pid")
+        if (!api.startAgent()) logLine("agent start reported a failure — the log below says why")
+    }
+
+    /**
+     * Waits for the forwarded agent port, reporting progress as it goes: on this hardware the gateway
+     * spends minutes enumerating tools and opening its databases before it binds.
+     */
+    private suspend fun awaitAgentPort(api: VmApiClient, timeoutSeconds: Int): Boolean {
         val deadline = System.currentTimeMillis() + timeoutSeconds * 1000L
+        var nextReport = System.currentTimeMillis() + 60_000
         while (System.currentTimeMillis() < deadline) {
-            if (api.agentStatus()?.running == true) return true
-            delay(2_000)
+            if (api.agentApiAnswers()) return true
+            if (System.currentTimeMillis() >= nextReport) {
+                val waited = timeoutSeconds - ((deadline - System.currentTimeMillis()) / 1000L).toInt()
+                logLine("still waiting for the agent on ${EngineStore.localEndpoint()} (${waited}s so far)")
+                nextReport = System.currentTimeMillis() + 60_000
+            }
+            delay(3_000)
         }
         return false
     }
+
+    /** Last lines of the guest's own agent log, for a failure message worth reading. */
+    private fun agentLogTail(api: VmApiClient, lines: Int = 6): String =
+        api.agentLog(lines * 8)
+            .lines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .takeLast(lines)
+            .joinToString(" | ")
+            .take(500)
+            .ifBlank { "(the guest has no agent log yet)" }
 
     private fun step(message: String) {
         _state.value = _state.value.copy(step = message)
@@ -287,6 +384,10 @@ object EngineController {
     private const val LOG_LIMIT = 400
     private const val CONTROL_TIMEOUT_SECONDS = 600
     // The gateway needs minutes to bind its endpoint on this hardware (tool check_fns, env probe and
-    // database setup all run first), so this is the app's patience, not a health check.
-    private const val AGENT_TIMEOUT_SECONDS = 900
+    // database setup all run first), so this is the app's patience, not a health check. The same
+    // twenty minutes the relay front end waits: a phone is several times slower than a build host.
+    private const val AGENT_TIMEOUT_SECONDS = 1200
+
+    /** How long a turn will wait for a cold engine before giving up on it. */
+    private const val OPERATIVE_TIMEOUT_SECONDS = 300
 }

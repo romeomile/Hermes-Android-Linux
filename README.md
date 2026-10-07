@@ -75,6 +75,13 @@ the control API and as the agent's `API_SERVER_KEY`. It is never baked into the 
 address or path specific to any machine exists in this repository — and the guest image build fails
 rather than ship one.
 
+**The engine is only called ready when the port the chat uses answers.** The guest's own "agent
+running" flag is derived from a pidfile, and guest pids are reused, so it can read true while nothing
+is listening. The app therefore verifies the forwarded agent port itself, clears a stale agent
+pidfile when that port is closed, makes sure the key the guest holds is one its gateway accepts, and
+waits up to twenty minutes for the port while reporting progress — a cold gateway under emulation
+needs minutes, and a message sent before then is what "connection lost" looks like.
+
 ## Why a VM and not a chroot
 
 A stock Android kernel gives a normal app no way to host a container: user namespaces are compiled
