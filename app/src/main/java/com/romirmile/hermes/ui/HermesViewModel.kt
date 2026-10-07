@@ -640,6 +640,15 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
         startStream(sessionId)
     }
 
+    /**
+     * Decides whether the on-device engine has to be prepared, prepares it if it does, and hands the
+     * turn to [startStreamReady].
+     *
+     * This function is entered **once per user turn**: it never calls itself, so a successful startup
+     * cannot lead back into another startup. For a local endpoint the readiness decision is made here,
+     * by `EngineController.awaitOperative()` — the controller's own authority, which joins a startup
+     * already in flight instead of launching a second one — and the turn then starts directly.
+     */
     private fun startStream(sessionId: String) {
         val config = _settings.value
         if (config.endpoint.isBlank()) {
@@ -654,28 +663,41 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        // The engine runs on this device and a cold guest needs minutes before its gateway binds, so a
-        // turn sent into that window must wait for the port instead of dying on it. Warm, this check
-        // costs one loopback request and the turn goes straight through. Sends in this view model share
-        // one wait, and the controller in turn owns a single startup operation, so a boot in progress is
-        // joined rather than duplicated.
-        if (config.endpoint.trimEnd('/') == EngineStore.localEndpoint() && !EngineController.isOperative()) {
-            job = viewModelScope.launch {
-                _sending.value = true
-                val ready = ensureOperative(context)
-                _userNotice.value = null
-                _sending.value = false
-                job = null
-                if (ready) {
-                    startStream(sessionId)
-                } else {
-                    appendError(sessionId, engineNotReadyText(context))
-                    persist()
-                }
-            }
+        // A user-supplied endpoint has nothing to prepare: the turn starts immediately.
+        if (config.endpoint.trimEnd('/') != EngineStore.localEndpoint()) {
+            startStreamReady(sessionId)
             return
         }
 
+        // The engine runs on this device and a cold guest needs minutes before its gateway binds, so a
+        // turn sent into that window waits for the port instead of dying on it. `_sending` stays on for
+        // the whole wait (the turn's own finally clears it), and progress goes out as a notice.
+        job = viewModelScope.launch {
+            _sending.value = true
+            val ready = ensureOperative(context)
+            _userNotice.value = null
+            if (!ready) {
+                _sending.value = false
+                job = null
+                appendError(sessionId, engineNotReadyText(context))
+                persist()
+                return@launch
+            }
+            // Ready: go straight to the chat turn. No re-check of readiness and no re-entry into this
+            // function - one user turn, one engine preparation, one chat request.
+            EngineController.logLine("engine ready — proceeding directly to chat turn")
+            job = null
+            startStreamReady(sessionId)
+        }
+    }
+
+    /**
+     * Starts the chat turn itself for an engine that is ready: the assistant placeholder, the
+     * idempotency key and the streaming request. The readiness decision belongs to [startStream];
+     * nothing here inspects the engine, and nothing here calls [startStream].
+     */
+    private fun startStreamReady(sessionId: String) {
+        EngineController.logLine("starting chat turn")
         val assistantId = UUID.randomUUID().toString()
         mutate(sessionId) { session ->
             session.copy(

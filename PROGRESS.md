@@ -551,6 +551,50 @@ Two more things the same screen exposed, both fixed in the app layer:
 The guest image is unchanged, so the extraction marker is unchanged: this update does **not** reset
 the guest, unlike 1.0.9. `versionCode 12`, `versionName 1.0.10`.
 
+### 1.0.15 — the readiness loop: `startStream` called itself
+
+Reported from the device: `Engine ready` → `startup completed successfully` → `no startup in progress —
+this call owns startup` → `startup owner: chat turn waiting for the engine` → … repeating hundreds of
+times, with no chat request ever leaving the app.
+
+`HermesViewModel.startStream()` had a recursive shape:
+
+```kotlin
+if (localEndpoint && !EngineController.isOperative()) {
+    job = viewModelScope.launch {
+        _sending.value = true
+        val ready = ensureOperative(context)
+        ...
+        if (ready) startStream(sessionId)      // <- re-enters the function it is inside of
+        ...
+    }
+    return
+}
+```
+
+Every re-entry re-ran the whole readiness branch. The reason it never converged is the two-second check
+inside `EngineController.isOperative()`: on a phone talking to the guest through SLIRP, that loopback
+request can take longer than 2 s while the controller's own readiness check (5 s, port-based) succeeds —
+so `isOperative()` answered "not ready" immediately after a startup that had just proved readiness.
+
+* `startStream()` now only decides: endpoint/offline validation, `startStreamReady()` for a
+  user-supplied endpoint, and for the local engine one wait on `ensureOperative()` followed by
+  `startStreamReady()`. It **never calls itself**, so a successful startup cannot lead back into another
+  startup.
+* `startStreamReady()` holds the turn itself — assistant placeholder, idempotency key, `runTurn()` — and
+  inspects nothing about the engine.
+* `_sending` stays on across the transition (the wait no longer clears it just to set it again), and the
+  turn's `finally` still clears it; cancelling during the wait (`stopGenerating`) also clears it.
+* New log lines around the transition: `engine ready — proceeding directly to chat turn` and
+  `starting chat turn`.
+* One user turn now produces exactly one `runTurn()`: `startStream` is called only from `send()` and
+  `regenerate()`, `startStreamReady` once per turn, and `runTurn` has a single call site. Retries inside
+  `runTurn` keep the same idempotency key, so the gateway still dedupes.
+* `EngineController` is unchanged: its lifecycle, single startup operation, joining, sequencing,
+  port-based readiness and refresh protection are exactly as they were in 1.0.14.
+
+`versionCode 17`, `versionName 1.0.15`.
+
 ### 1.0.14 — one authoritative engine startup (the lifecycle race)
 
 Reported from a device log: `21:23:50 the engine is running but nothing is on … — asking it to start the
