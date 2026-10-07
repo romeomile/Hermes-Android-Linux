@@ -551,6 +551,30 @@ Two more things the same screen exposed, both fixed in the app layer:
 The guest image is unchanged, so the extraction marker is unchanged: this update does **not** reset
 the guest, unlike 1.0.9. `versionCode 12`, `versionName 1.0.10`.
 
+### 1.2.1 — the chat follows the keyboard, and stops raising it on return
+
+Two defects in 1.2.0, each traced to its cause from Romeo's reports rather than patched by guesswork.
+
+* **The keyboard came back when returning to the chat.** `ChatScreen` is composed permanently — every
+  other screen is drawn on top of it inside a `Box` — so the one-shot
+  `LaunchedEffect(Unit) { clearFocus() }` only ever ran once, at app start. Coming back from Settings
+  dropped focus onto the composer that was still composed underneath, and the keyboard followed it up.
+  The screen now takes a `visible` flag from `HermesApp` and clears focus on every transition, in both
+  directions: leaving clears it so nothing hands the keyboard to the next screen, returning clears it so
+  the chat opens without one.
+* **The re-anchor landed at the beginning of the last message.** 1.2.0 scrolled with
+  `animateScrollToItem(lastIndex)` keyed on the IME inset alone. Three things were wrong with that: an
+  animated scroll finishes before the keyboard has stopped moving; `scrollToItem(index)` puts that item's
+  TOP at the top of the viewport, so a message taller than the viewport keeps its newest lines below the
+  fold ("it returns you at the beginning of the message"); and where the keyboard shrinks the window
+  instead of growing the IME inset, the inset stays 0 and nothing triggers at all. The trigger is now the
+  IME inset **and** the list's own viewport height (which covers both modes), the scroll is instant so it
+  re-anchors on every frame of the keyboard animation, and `LazyListState.scrollToNewest()` walks to the
+  true end — the index jump, then up to four viewport-height steps while `canScrollForward`. The
+  new-message scroll uses the same helper, so both triggers end at the bottom of the conversation.
+
+`versionCode 21`, `versionName 1.2.1`.
+
 ### 1.2.0 — reasoning, applied by the agent
 
 Settings gains a **Reasoning** section, between Connection and Appearance, built with the same

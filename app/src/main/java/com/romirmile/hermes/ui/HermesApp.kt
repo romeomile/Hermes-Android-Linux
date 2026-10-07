@@ -62,6 +62,9 @@ fun HermesApp(vm: HermesViewModel) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             ChatScreen(
                 vm = vm,
+                // Other screens are drawn on top of the chat, so it is always composed: tell it when it
+                // is actually the one on screen.
+                visible = screen == Screen.CHAT.name,
                 onOpenSettings = { open(Screen.SETTINGS) },
                 onOpenVoice = { screen = Screen.VOICE.name },
                 onOpenJobs = { open(Screen.JOBS) },

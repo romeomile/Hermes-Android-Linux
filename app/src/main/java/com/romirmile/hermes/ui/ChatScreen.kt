@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -112,6 +114,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChatScreen(
     vm: HermesViewModel,
+    visible: Boolean,
     onOpenSettings: () -> Unit,
     onOpenVoice: () -> Unit,
     onOpenJobs: () -> Unit,
@@ -138,16 +141,32 @@ fun ChatScreen(
     val focusManager = LocalFocusManager.current
     val density = LocalDensity.current
 
-    // Opening the chat must not raise the keyboard. Focus left behind by the previous screen (or a
-    // restored focus) otherwise pulls the keyboard up over the conversation the moment the chat opens.
-    // The composer takes focus when it is tapped, and not before.
-    LaunchedEffect(Unit) { focusManager.clearFocus(force = true) }
+    // The chat must never raise the keyboard by itself. This screen stays composed underneath every
+    // other screen (they are drawn on top of it), so a one-shot effect at app start was not enough:
+    // returning from Settings dropped focus onto the chat's composer — still composed below — and the
+    // keyboard came back with it. Keying the clear on visibility covers both directions: leaving clears
+    // focus so nothing hands the keyboard to the next screen, and coming back clears it again so the
+    // chat opens without one. The composer takes focus when it is tapped, and not before.
+    LaunchedEffect(visible) { focusManager.clearFocus(force = true) }
 
-    // With the keyboard up, the newest message must not stay hidden under it: the list is re-anchored
-    // to the bottom as the keyboard opens, so the conversation scrolls up with it.
+    // The newest message must come back into view when the keyboard opens. Two things make that harder
+    // than it looks, and both are handled here:
+    //   * the keyboard shrinks the list one of two ways — the IME inset grows (edge-to-edge), or the
+    //     window is resized (plain adjustResize, where the IME inset stays 0). Watching the list's own
+    //     viewport height covers both, without depending on how insets are dispatched;
+    //   * the inset animates over several frames, so an animated scroll finishes before the keyboard has
+    //     stopped moving and leaves the list short of the bottom. This re-anchors instantly on every
+    //     change instead, and scrolls past the end on purpose so the last message's BOTTOM is visible
+    //     (a plain scroll to the last index aligns its top).
     val imeBottom = WindowInsets.ime.getBottom(density)
-    LaunchedEffect(imeBottom) {
-        if (imeBottom > 0 && messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    val viewportHeight = listState.layoutInfo.viewportSize.height
+    var previousViewport by remember { mutableStateOf(0) }
+    LaunchedEffect(imeBottom, viewportHeight) {
+        val shrank = previousViewport != 0 && viewportHeight < previousViewport
+        previousViewport = viewportHeight
+        if (messages.isNotEmpty() && (imeBottom > 0 || shrank)) {
+            listState.scrollToNewest(messages.lastIndex)
+        }
     }
 
     var menuOpen by remember { mutableStateOf(false) }
@@ -188,7 +207,7 @@ fun ChatScreen(
     }
 
     LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length) {
-        if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
+        if (messages.isNotEmpty()) listState.scrollToNewest(messages.lastIndex)
     }
 
     ModalNavigationDrawer(
@@ -650,6 +669,21 @@ private fun EmptyChat(
                 }
             }
         }
+    }
+}
+
+/**
+ * Lands on the end of the conversation rather than on the start of the last message: scrolling to an
+ * index alone puts that item's TOP at the top of the viewport, so a message taller than the viewport
+ * (a long answer, an opened terminal tab) leaves its newest lines below the fold. After the index jump
+ * this walks forward a viewport at a time until there is nothing left to scroll.
+ */
+private suspend fun LazyListState.scrollToNewest(lastIndex: Int) {
+    scrollToItem(lastIndex)
+    var steps = 0
+    while (steps < 4 && canScrollForward) {
+        scrollBy(layoutInfo.viewportSize.height.toFloat())
+        steps++
     }
 }
 
