@@ -208,21 +208,52 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
             _reasoningStatus.value = context.getString(R.string.settings_need_endpoint)
             return
         }
+        val model = config.model.ifBlank { HermesClient.DEFAULT_MODEL }
         viewModelScope.launch {
-            _reasoningStatus.value = context.getString(R.string.settings_reasoning_checking, config.model)
+            _reasoningStatus.value = context.getString(R.string.settings_reasoning_probing, model)
             val attempt = withContext(Dispatchers.IO) {
-                client.reasoningSupport(config.endpoint, config.apiKey, config.model)
+                client.probeChat(config.endpoint, config.apiKey, config.model)
             }
-            val support = attempt.getOrNull()
+            val probe = attempt.getOrNull()
+            val failure = attempt.exceptionOrNull()
             _reasoningStatus.value = when {
-                attempt.isFailure -> context.getString(
-                    R.string.settings_reasoning_offline,
-                    attempt.exceptionOrNull()?.message.orEmpty().ifBlank { "unreachable" }
-                )
-                support == null -> context.getString(R.string.settings_reasoning_unlisted, config.model)
-                !support.reasoning -> context.getString(R.string.settings_reasoning_unsupported, config.model)
-                support.canDisable == false -> context.getString(R.string.settings_reasoning_mandatory, config.model)
-                else -> context.getString(R.string.settings_reasoning_supported, config.model)
+                failure is HermesClient.AgentReplyException &&
+                    failure.httpCode in listOf(400, 404) ->
+                    // The one failure that is really about the model name.
+                    context.getString(
+                        R.string.settings_reasoning_model_rejected,
+                        model,
+                        failure.message.orEmpty().ifBlank { "HTTP ${failure.httpCode}" }
+                    )
+
+                failure is HermesClient.AgentReplyException ->
+                    context.getString(R.string.settings_reasoning_agent_error, failure.message.orEmpty())
+
+                failure != null ->
+                    context.getString(
+                        R.string.settings_reasoning_offline,
+                        failure.message.orEmpty().ifBlank { "unreachable" }
+                    )
+
+                else -> {
+                    // The agent answered a real turn: the alias works. The model listing below is only an
+                    // enrichment — a model the agent does not list can still answer, so it never decides this.
+                    val line = context.getString(
+                        R.string.settings_reasoning_ok,
+                        probe?.agentVersion ?: "?",
+                        probe?.model.orEmpty().ifBlank { model }
+                    )
+                    val capability = withContext(Dispatchers.IO) {
+                        runCatching {
+                            client.reasoningSupport(config.endpoint, config.apiKey, config.model).getOrNull()
+                        }.getOrNull()
+                    }
+                    if (capability != null && !capability.reasoning) {
+                        "$line ${context.getString(R.string.settings_reasoning_ok_no_reasoning)}"
+                    } else {
+                        line
+                    }
+                }
             }
         }
     }

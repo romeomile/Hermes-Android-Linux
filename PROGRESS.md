@@ -551,6 +551,45 @@ Two more things the same screen exposed, both fixed in the app layer:
 The guest image is unchanged, so the extraction marker is unchanged: this update does **not** reset
 the guest, unlike 1.0.9. `versionCode 12`, `versionName 1.0.10`.
 
+### 1.2.2 — "Check the agent" tests the model instead of reading a list
+
+Romeo's report: the app said *"Connected to Hermes 0.21.3"* and, two lines below, *"The agent answered,
+but does not list hermes-agent — check the model name above."* The agent was working the whole time.
+
+**Cause.** 1.2.0's check read `GET /api/model/options` — the model **picker inventory**, which is built
+from the provider catalogue (for DeepSeek: `deepseek-v4-pro`, `deepseek-flash`, …). `hermes-agent` is the
+api_server's own chat alias and is not an entry in that inventory, so a working model was reported as
+invalid. A listing was being used as a validity verdict.
+
+**Fix.** `HermesClient.probeChat()` sends one minimal, non-streaming turn — `POST /v1/chat/completions`
+with `{model, stream:false, messages:[{role:user, content:"hello"}]}` in a throwaway
+`X-Hermes-Session-Id: hermes-android-check` session — and the check now reports what that turn produced:
+`Agent OK — Hermes <version> answered using <model>`. Only a 400/404 (carried by the new
+`AgentReplyException`) is read as a rejected model, and it shows the agent's own error text; anything else
+shows the real HTTP error. The capability listing may only *enrich* the line (noting a model that reports
+no reasoning level) — it can never decide validity again. **Fetch models** and **Test connection** are
+untouched; `checkConnection` still treats `/health` as authoritative and never infers validity from
+`/v1/models`.
+
+**Measured, against Hermes 0.21.3 in a throwaway guest** (agent pointed at a local stub provider, a
+placeholder key, no real credential):
+
+* `POST /v1/chat/completions` with `model: "hermes-agent"`, `stream: false` → **HTTP 200**,
+  `model: "hermes-agent"`, reply *"stub answer to hello"* — the alias works although it is not a provider
+  model id.
+* The first probe turn took **185 s** under emulation, so the probe's read timeout was raised from 120 s to
+  300 s: a 120 s cap would have turned a slow-but-working agent into a false failure — the same class of
+  bug, one layer down.
+* A nonsense model name (`definitely-not-a-model-xyz`) was also answered with HTTP 200 and the configured
+  model: Hermes does not validate the alias against the request at all, and the stub log shows the upstream
+  call always carried the configured model. So an agent-side "invalid model" 400 is effectively
+  unreachable; the 400/404 branch stays as a safety net for what the transport can still report.
+
+Strings: the false-negative line and the four capability-only lines are gone from `strings.xml`; the
+section's support text now says what the check does.
+
+`versionCode 22`, `versionName 1.2.2`.
+
 ### 1.2.1 — the chat follows the keyboard, and stops raising it on return
 
 Two defects in 1.2.0, each traced to its cause from Romeo's reports rather than patched by guesswork.

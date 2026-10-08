@@ -358,6 +358,69 @@ class HermesClient {
     fun modelsUrl(base: String) = "${normalize(base)}/models"
     fun healthUrl(base: String) = "${normalize(base)}/health"
 
+    /**
+     * An HTTP failure from the agent, carrying its status so the UI can tell "the agent rejected this
+     * model" (400/404) apart from "the agent is not answering".
+     */
+    class AgentReplyException(val httpCode: Int, message: String) : IllegalStateException(message)
+
+    /** What one real, minimal turn through the configured model produced. */
+    data class ChatProbe(val httpCode: Int, val agentVersion: String?, val model: String, val reply: String)
+
+    /**
+     * Sends one minimal, non-streaming turn and returns what came back.
+     *
+     * `/v1/models` says nothing about whether an alias works: Hermes answers `/v1/chat/completions` for
+     * model names it does not list (the app's own default alias is one of them), so validity is proven by
+     * using the model, never inferred from a listing.
+     */
+    suspend fun probeChat(baseUrl: String, apiKey: String, model: String): Result<ChatProbe> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val resolved = model.ifBlank { DEFAULT_MODEL }
+                val conn = open("POST", chatUrl(baseUrl), apiKey).apply {
+                    doOutput = true
+                    connectTimeout = 20_000
+                    // A cold turn on this device legitimately takes minutes: measured against Hermes
+                    // 0.21.3 in the shipped guest, the first probe turn took 185 s. A 120 s cap would
+                    // have reported a timeout as a fault, so the probe waits far longer than a warm
+                    // answer needs — it still gives up, so a Settings button cannot hang forever.
+                    readTimeout = 300_000
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    // A throwaway session: a check must not append itself to a real conversation.
+                    setRequestProperty("X-Hermes-Session-Id", PROBE_SESSION)
+                }
+                try {
+                    val body = JSONObject().apply {
+                        put("model", resolved)
+                        put("stream", false)
+                        put(
+                            "messages",
+                            JSONArray().put(JSONObject().put("role", "user").put("content", "hello"))
+                        )
+                    }.toString()
+                    conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+
+                    val code = conn.responseCode
+                    val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                        ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    if (code !in 200..299) throw AgentReplyException(code, httpError(code, text))
+                    val json = JSONObject(text)
+                    val choice = json.optJSONArray("choices")?.optJSONObject(0)
+                    val reply = (choice?.optJSONObject("message")?.optString("content").orEmpty())
+                        .ifBlank { choice?.optJSONObject("delta")?.optString("content").orEmpty() }
+                    ChatProbe(
+                        httpCode = code,
+                        agentVersion = runCatching { readVersion(baseUrl, apiKey) }.getOrNull(),
+                        model = json.optString("model").ifBlank { resolved },
+                        reply = reply
+                    )
+                } finally {
+                    runCatching { conn.disconnect() }
+                }
+            }
+        }
+
     /** `/api/model/options` lives on the gateway root, beside /v1 — not inside it. */
     fun modelOptionsUrl(base: String) = "${normalize(base).removeSuffix("/v1")}/api/model/options"
 
@@ -365,8 +428,9 @@ class HermesClient {
     data class ReasoningSupport(val reasoning: Boolean, val canDisable: Boolean?)
 
     /**
-     * Asks the agent what it supports: `null` means the agent answered but does not list this model.
-     * Read from the agent so the app reports a capability instead of assuming one.
+     * The agent's own model-capability listing (`null` = it does not list this model). This is an
+     * enrichment only — a model the agent does not list can still answer, so nothing may be judged valid
+     * or invalid from here; [probeChat] is what proves a configured model works.
      */
     suspend fun reasoningSupport(baseUrl: String, apiKey: String, model: String): Result<ReasoningSupport?> =
         withContext(Dispatchers.IO) {
@@ -412,5 +476,8 @@ class HermesClient {
     companion object {
         /** The model alias the Hermes api_server answers to when the user has not picked one. */
         const val DEFAULT_MODEL = "hermes-agent"
+
+        /** Session used by the connectivity probe, so a check never lands in a real conversation. */
+        private const val PROBE_SESSION = "hermes-android-check"
     }
 }
