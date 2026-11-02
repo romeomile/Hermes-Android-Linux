@@ -41,7 +41,10 @@ jobs:
         run: echo "marker=$(scripts/fetch_released_image.sh)" >> "$GITHUB_OUTPUT"
 
       - name: Unit tests
-        run: ./gradlew --no-daemon testDebugUnitTest -PguestImageSha256=${{ steps.image.outputs.marker }}
+        run: |
+          ./gradlew --no-daemon testDebugUnitTest -PguestImageSha256=${{ steps.image.outputs.marker }}
+          grep -h -o '<testsuite name="[^"]*" tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*" errors="[0-9]*"' \
+            app/build/test-results/testDebugUnitTest/*.xml
 
       - name: Build the APK
         run: ./gradlew --no-daemon assembleDebug -PguestImageSha256=${{ steps.image.outputs.marker }}
@@ -51,6 +54,9 @@ jobs:
           APK=app/build/outputs/apk/debug/app-debug.apk
           unzip -l "$APK" | grep -E 'assets/vm/(base.qcow2|vmlinuz-virt|initramfs-virt)|lib/arm64-v8a/libqemu.so'
           ls -la "$APK"
+          # The guest marker baked into the app must be the released one, or installs reset their guest.
+          mkdir -p dex && unzip -q -o "$APK" 'classes*.dex' -d dex
+          grep -l -a "${{ steps.image.outputs.marker }}" dex/*.dex
 
       - uses: actions/upload-artifact@v4
         with:
