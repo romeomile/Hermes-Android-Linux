@@ -1,0 +1,82 @@
+name: Release
+
+# Builds the APK for a version tag (v1.2.3) and publishes it as a GitHub release, the same asset
+# layout as the hand-made releases: HermesLinux-<version>-debug.apk plus its .sha256.
+#
+# Signing: Android only installs an update signed with the SAME key as the installed app. Earlier
+# releases were debug-signed on the build host, with ~/.android/debug.keystore there. Put that file in
+# the repository secret HERMES_DEBUG_KEYSTORE_B64 (base64 of the file) and every release from here
+# updates in place. Without the secret the runner signs with a throwaway key, and the release says so:
+# installing it then needs an uninstall first, which also deletes the guest disk.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Signing key
+        id: key
+        env:
+          KEYSTORE_B64: ${{ secrets.HERMES_DEBUG_KEYSTORE_B64 }}
+        run: |
+          mkdir -p ~/.android
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+            echo "signing with the project's debug key"
+          else
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::HERMES_DEBUG_KEYSTORE_B64 is not set - this APK is signed with a throwaway key and cannot update an installed app"
+          fi
+
+      - name: Restore the released guest image
+        id: image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "marker=$(scripts/fetch_released_image.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Test and build
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug -PguestImageSha256=${{ steps.image.outputs.marker }}
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STABLE: ${{ steps.key.outputs.stable }}
+        run: |
+          VERSION=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts)
+          TAG="v$VERSION"
+          NAME="HermesLinux-$VERSION-debug.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$NAME"
+          sha256sum "$NAME" > "$NAME.sha256"
+          {
+            echo "Hermes Linux $VERSION, built by CI from $(git rev-parse --short HEAD)."
+            echo
+            echo "Guest image unchanged (restored from the release in image/RELEASED_IMAGE, same marker), so an in-place update keeps the guest."
+            echo
+            if [ "$STABLE" != "true" ]; then
+              echo "**Signed with a new key.** Android will not install it over an earlier release: uninstall the old app first. That also deletes the guest disk (provider keys, packages and files inside the VM)."
+              echo
+            fi
+            echo "Changes: see PROGRESS.md."
+          } > notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$NAME" "$NAME.sha256" --clobber
+          else
+            gh release create "$TAG" "$NAME" "$NAME.sha256" --title "Hermes Linux $VERSION" --notes-file notes.md
+          fi
