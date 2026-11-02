@@ -45,6 +45,34 @@ import java.util.UUID
 /** Session id prefix of the one-tap agent-side setup turn (one setup session per install). */
 private const val SETUP_SESSION_PREFIX = "android-setup-"
 
+/**
+ * True when [endpoint] addresses this device's own engine, however it was typed: with or without a
+ * scheme, `/v1`, a trailing slash, or `localhost` for `127.0.0.1`.
+ */
+internal fun isLocalEndpoint(endpoint: String): Boolean {
+    var e = endpoint.trim().lowercase().removePrefix("http://").removePrefix("https://").trimEnd('/')
+    e = e.removeSuffix("/v1").trimEnd('/')
+    return e == "127.0.0.1:${EngineStore.AGENT_PORT}" || e == "localhost:${EngineStore.AGENT_PORT}"
+}
+
+/**
+ * The app exists to talk to the agent in its own VM, so that is the endpoint until the user sets
+ * another one — a fresh install must not answer its first message with "no endpoint is set" just
+ * because the engine was still booting. And while the local engine is the endpoint, its key is
+ * always the device token: the agent accepts nothing else, so a stale or hand-typed key could only
+ * ever produce 401s.
+ */
+internal fun withLocalEngine(context: Context, settings: AppSettings): AppSettings {
+    val token = EngineController.token(context)
+    return when {
+        settings.endpoint.isBlank() ->
+            settings.copy(endpoint = EngineStore.localEndpoint(), apiKey = token)
+        isLocalEndpoint(settings.endpoint) && settings.apiKey != token ->
+            settings.copy(apiKey = token)
+        else -> settings
+    }
+}
+
 class HermesViewModel(app: Application) : AndroidViewModel(app) {
 
     private val client = HermesClient()
@@ -55,7 +83,9 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
     private val _currentId = MutableStateFlow<String?>(null)
     val currentId: StateFlow<String?> = _currentId.asStateFlow()
 
-    private val _settings = MutableStateFlow(SettingsStore.loadAfterMigrating(app))
+    private val _settings = MutableStateFlow(
+        withLocalEngine(app, SettingsStore.loadAfterMigrating(app)).also { SettingsStore.save(app, it) }
+    )
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
     private val _sending = MutableStateFlow(false)
@@ -122,7 +152,21 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
     private val sessionlessChats = mutableSetOf<String>()
 
     init {
-        val loaded = ChatStore.load(app).map { session ->
+        val loaded = ChatStore.load(app).map { stored ->
+            // Nothing is in flight after a restart: a reply or tool that was cut off by the process
+            // dying must not keep a spinner forever.
+            val session = stored.copy(
+                messages = stored.messages.map { message ->
+                    if (message.streaming || message.activity.any { it.running }) {
+                        message.copy(
+                            streaming = false,
+                            activity = message.activity.map { it.copy(running = false) }
+                        )
+                    } else {
+                        message
+                    }
+                }
+            )
             // Pre-existing chats get a session id too, so every chat maps to a Hermes session.
             if (session.gatewaySessionId.isBlank()) {
                 session.copy(gatewaySessionId = newGatewaySessionId())
@@ -178,7 +222,7 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun updateSettings(update: (AppSettings) -> AppSettings) {
-        val next = update(_settings.value)
+        val next = withLocalEngine(context, update(_settings.value))
         _settings.value = next
         SettingsStore.save(context, next)
     }
@@ -640,7 +684,7 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         // A user-supplied endpoint has nothing to prepare: the turn starts immediately.
-        if (config.endpoint.trimEnd('/') != EngineStore.localEndpoint()) {
+        if (!isLocalEndpoint(config.endpoint)) {
             startStreamReady(sessionId)
             return
         }
@@ -695,7 +739,14 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
                 runTurn(sessionId, assistantId, idempotencyKey)
             } finally {
                 if (job?.isCancelled != true) {
-                    updateAssistant(sessionId, assistantId) { it.copy(streaming = false) }
+                    // A turn that ended (or failed) leaves no tool spinning: the agent may not report
+                    // the completion of a tool it abandoned.
+                    updateAssistant(sessionId, assistantId) { message ->
+                        message.copy(
+                            streaming = false,
+                            activity = message.activity.map { it.copy(running = false) }
+                        )
+                    }
                     _sending.value = false
                     job = null
                     persist()
@@ -794,6 +845,7 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
         FailureKind.HOST_UNREACHABLE -> context.getString(R.string.error_host_unreachable)
         FailureKind.TIMEOUT -> context.getString(R.string.error_timeout)
         FailureKind.CONNECTION_LOST -> context.getString(R.string.error_connection_lost)
+        FailureKind.AGENT -> context.getString(R.string.error_agent_failed, failed.detail)
         FailureKind.HTTP, FailureKind.UNKNOWN -> failed.detail
     }
 
@@ -872,7 +924,7 @@ class HermesViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun addTool(sessionId: String, messageId: String, activity: ToolActivity) {
         updateAssistant(sessionId, messageId) { message ->
-            message.copy(activity = message.activity.dropLastWhile { !it.running } + activity)
+            message.copy(activity = message.activity + activity)
         }
     }
 

@@ -17,7 +17,7 @@ import java.net.UnknownHostException
 import kotlin.coroutines.cancellation.CancellationException
 
 /** Why a stream failed — mapped to a localized message by the view model. */
-enum class FailureKind { OFFLINE, HOST_UNREACHABLE, TIMEOUT, CONNECTION_LOST, HTTP, UNKNOWN }
+enum class FailureKind { OFFLINE, HOST_UNREACHABLE, TIMEOUT, CONNECTION_LOST, HTTP, AGENT, UNKNOWN }
 
 /** Events produced while streaming one assistant turn from the Hermes API server. */
 sealed interface StreamEvent {
@@ -164,6 +164,19 @@ class HermesClient {
                                 if (toolEvent != null) emit(toolEvent) else {
                                     val text = deltaText(obj)
                                     if (!text.isNullOrEmpty()) emit(StreamEvent.Delta(text))
+                                    // The agent reports a failed turn (no provider key, provider
+                                    // unreachable, rejected model) inside an HTTP 200 stream: the last
+                                    // chunk carries finish_reason "error" and an `error` object. Ignoring
+                                    // it left an empty reply bubble with no reason at all.
+                                    agentFailure(obj)?.let { reason ->
+                                        emit(
+                                            StreamEvent.Failed(
+                                                kind = FailureKind.AGENT,
+                                                detail = reason,
+                                                retryable = false
+                                            )
+                                        )
+                                    }
                                 }
                             }
                             eventName = ""
@@ -300,10 +313,16 @@ class HermesClient {
         val looksLikeTool = eventName.contains("tool") || obj.has("tool") || obj.has("tool_name")
         if (!looksLikeTool || name.isBlank()) return null
 
+        // Hermes sends `event: hermes.tool.progress` with {tool, label, toolCallId, status}; the
+        // lifecycle is in `status` ("running" / "completed"), not in the event name, which says
+        // "progress" for both. Reading only the event name turned every completion into another
+        // start, so tool cards never finished.
         val preview = obj.optString("preview").ifBlank {
-            obj.optString("arguments").ifBlank { obj.optString("args") }
+            obj.optString("label").ifBlank {
+                obj.optString("arguments").ifBlank { obj.optString("args") }
+            }
         }
-        val phase = obj.optString("phase").ifBlank { eventName }
+        val phase = obj.optString("status").ifBlank { obj.optString("phase").ifBlank { eventName } }
         val finished = phase.contains("complete", true) ||
             phase.contains("finish", true) ||
             phase.contains("end", true)
@@ -316,6 +335,28 @@ class HermesClient {
             )
         } else {
             StreamEvent.ToolStarted(name, preview)
+        }
+    }
+
+    /**
+     * The reason a turn failed on the agent's side, or null for a healthy chunk. Hermes marks it with
+     * `finish_reason: "error"` (or a `hermes.failed` flag) and an `error` object; a truncated turn
+     * (`partial`) that still carries an error message is reported too.
+     */
+    private fun agentFailure(obj: JSONObject): String? {
+        val choice = obj.optJSONArray("choices")?.optJSONObject(0)
+        val finish = choice?.optString("finish_reason").orEmpty()
+        val hermes = obj.optJSONObject("hermes")
+        val failed = finish == "error" || hermes?.optBoolean("failed", false) == true
+        val message = when (val err = obj.opt("error")) {
+            is JSONObject -> err.optString("message")
+            is String -> err
+            else -> ""
+        }.ifBlank { hermes?.optString("error").orEmpty() }
+        return when {
+            failed -> message.ifBlank { "the agent could not complete this turn" }
+            message.isNotBlank() && finish.isNotBlank() && finish != "stop" -> message
+            else -> null
         }
     }
 
@@ -406,6 +447,10 @@ class HermesClient {
                         ?.bufferedReader()?.use { it.readText() }.orEmpty()
                     if (code !in 200..299) throw AgentReplyException(code, httpError(code, text))
                     val json = JSONObject(text)
+                    // A 200 is not a working model: Hermes answers a failed provider call with 200 and
+                    // finish_reason "error" (the error text even lands in the message content), which
+                    // used to be reported as "Agent OK".
+                    agentFailure(json)?.let { reason -> throw AgentReplyException(code, reason) }
                     val choice = json.optJSONArray("choices")?.optJSONObject(0)
                     val reply = (choice?.optJSONObject("message")?.optString("content").orEmpty())
                         .ifBlank { choice?.optJSONObject("delta")?.optString("content").orEmpty() }

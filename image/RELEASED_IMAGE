@@ -1,0 +1,11 @@
+# The guest disk the current releases ship. Builds that do not rebuild the image (CI) restore it from
+# this release's APK instead, and must keep its extraction marker so installed guests are not reset.
+#
+#   tag      release whose APK carries the image (assets/vm/base.qcow2)
+#   marker   GUEST_IMAGE_SHA256 that release was built with (sha256 of the packed base.qcow2.gz)
+#   qcow2    sha256 of assets/vm/base.qcow2 inside that APK (checked after unpacking)
+#
+# Update all three when a release ships a new image.
+tag=v1.2.2
+marker=3f4f3c32e1b560b3904e6fee6e8dcbc6b740f463a36f5ea1d735dffe332b2cb5
+qcow2=5ec7b4d0195bcb56c9dd566d20323a06f1b823794ce2564e985d050d7aaf961f

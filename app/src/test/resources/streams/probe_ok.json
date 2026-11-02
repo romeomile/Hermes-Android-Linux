@@ -1,0 +1,1 @@
+{"id": "chatcmpl-e1410db892a94c15a73777c773785", "object": "chat.completion", "created": 1793638037, "model": "hermes-agent", "choices": [{"index": 0, "message": {"role": "assistant", "content": "stub answer to: hello"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10}}
