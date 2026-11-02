@@ -17,6 +17,15 @@ plugins {
  */
 val guestImageSha256: String = run {
     val image = file("src/main/assets/vm/base.qcow2.gz")
+    // A build that restores a published guest image instead of building one (CI does: it unpacks
+    // assets/vm/base.qcow2 from the release APK) has no .gz to hash. It passes the marker that release
+    // shipped with -PguestImageSha256=..., so installs of that release keep their guest disk.
+    val override = (findProperty("guestImageSha256") as String?)?.trim().orEmpty()
+    if (override.isNotEmpty()) {
+        require(Regex("[0-9a-f]{64}").matches(override)) { "guestImageSha256 must be a sha256 hex string" }
+        logger.lifecycle("guest image marker taken from -PguestImageSha256: $override")
+        return@run override
+    }
     if (!image.exists()) {
         logger.lifecycle("WARNING: ${image.path} is missing — run image/build_guest_image.sh")
         "missing"
@@ -42,8 +51,8 @@ android {
         applicationId = "com.romirmile.hermeslinux"
         minSdk = 26
         targetSdk = 35
-        versionCode = 22
-        versionName = "1.2.2"
+        versionCode = 23
+        versionName = "1.2.3"
         ndk { abiFilters += "arm64-v8a" }
         buildConfigField("String", "GUEST_IMAGE_SHA256", "\"$guestImageSha256\"")
     }
@@ -104,4 +113,9 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // JVM tests replay streams recorded from the shipped Hermes gateway through the real client.
+    // org.json is Android framework code (a stub on the JVM), so the tests bring the real library.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

@@ -180,6 +180,14 @@ chroot, writes the guest services, then packs a sparse ext4 image and converts i
 qcow2. It prints the image sha256, which is also the app's extraction marker: a rebuilt image is
 picked up by existing installs automatically, with nothing to hand-bump.
 
+For an app-only change you can skip this step and reuse the guest of the current release, keeping its
+extraction marker so installed guests are not reset (this is what CI does):
+
+```sh
+MARKER=$(scripts/fetch_released_image.sh)      # -> app/src/main/assets/vm/base.qcow2
+./gradlew assembleDebug -PguestImageSha256="$MARKER"
+```
+
 ### 2. APK
 
 ```sh

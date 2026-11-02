@@ -1,0 +1,72 @@
+name: Build
+
+# Compiles the app, runs the JVM tests and checks the guest scripts on every push and pull request.
+# The guest disk is not rebuilt here: the one the current release ships is restored from its APK
+# (image/RELEASED_IMAGE), with the same extraction marker, so the APK this produces boots the same guest.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guest-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: for f in image/guest/*.sh image/*.sh scripts/*.sh; do sh -n "$f" && echo "ok  $f"; done
+      - name: Python syntax
+        run: python3 -m py_compile image/guest/*.py agent-side/hermes-audio-api/*.py && echo ok
+
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Restore the released guest image
+        id: image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "marker=$(scripts/fetch_released_image.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Unit tests
+        run: |
+          ./gradlew --no-daemon testDebugUnitTest -PguestImageSha256=${{ steps.image.outputs.marker }}
+          grep -h -o '<testsuite name="[^"]*" tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*" errors="[0-9]*"' \
+            app/build/test-results/testDebugUnitTest/*.xml
+
+      - name: Build the APK
+        run: ./gradlew --no-daemon assembleDebug -PguestImageSha256=${{ steps.image.outputs.marker }}
+
+      - name: Check the APK carries the guest
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          unzip -l "$APK" | grep -E 'assets/vm/(base.qcow2|vmlinuz-virt|initramfs-virt)|lib/arm64-v8a/libqemu.so'
+          ls -la "$APK"
+          # The guest marker baked into the app must be the released one, or installs reset their guest.
+          mkdir -p dex && unzip -q -o "$APK" 'classes*.dex' -d dex
+          grep -l -a "${{ steps.image.outputs.marker }}" dex/*.dex
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HermesLinux-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: app/build/reports/tests/
+          retention-days: 7

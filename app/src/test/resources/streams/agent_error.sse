@@ -1,0 +1,6 @@
+data: {"id": "chatcmpl-7637b935264a4a07a4502c3c8fc93", "object": "chat.completion.chunk", "created": 1793637821, "model": "hermes-agent", "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-7637b935264a4a07a4502c3c8fc93", "object": "chat.completion.chunk", "created": 1793637821, "model": "hermes-agent", "choices": [{"index": 0, "delta": {}, "finish_reason": "error"}], "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, "error": {"message": "Connection error.", "type": "agent_error"}, "hermes": {"completed": false, "partial": false, "failed": true, "error": "Connection error.", "error_code": "agent_error"}}
+
+data: [DONE]
+

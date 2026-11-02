@@ -1,0 +1,24 @@
+data: {"id": "chatcmpl-3274ff0b4f4b494f981b41e2a66f3", "object": "chat.completion.chunk", "created": 1793638007, "model": "hermes-agent", "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": null}]}
+
+event: hermes.tool.progress
+data: {"tool": "terminal", "emoji": "\ud83d\udcbb", "label": "echo hi", "toolCallId": "call_1", "status": "running"}
+
+event: hermes.tool.progress
+data: {"tool": "terminal", "toolCallId": "call_1", "status": "completed"}
+
+data: {"id": "chatcmpl-3274ff0b4f4b494f981b41e2a66f3", "object": "chat.completion.chunk", "created": 1793638007, "model": "hermes-agent", "choices": [{"index": 0, "delta": {"content": "\n\nstub "}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-3274ff0b4f4b494f981b41e2a66f3", "object": "chat.completion.chunk", "created": 1793638007, "model": "hermes-agent", "choices": [{"index": 0, "delta": {"content": "answer "}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-3274ff0b4f4b494f981b41e2a66f3", "object": "chat.completion.chunk", "created": 1793638007, "model": "hermes-agent", "choices": [{"index": 0, "delta": {"content": "to: "}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-3274ff0b4f4b494f981b41e2a66f3", "object": "chat.completion.chunk", "created": 1793638007, "model": "hermes-agent", "choices": [{"index": 0, "delta": {"content": "please "}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-3274ff0b4f4b494f981b41e2a66f3", "object": "chat.completion.chunk", "created": 1793638007, "model": "hermes-agent", "choices": [{"index": 0, "delta": {"content": "TOOL "}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-3274ff0b4f4b494f981b41e2a66f3", "object": "chat.completion.chunk", "created": 1793638007, "model": "hermes-agent", "choices": [{"index": 0, "delta": {"content": "run "}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-3274ff0b4f4b494f981b41e2a66f3", "object": "chat.completion.chunk", "created": 1793638007, "model": "hermes-agent", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10}}
+
+data: [DONE]
+

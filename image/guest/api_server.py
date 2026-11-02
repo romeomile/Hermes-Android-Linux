@@ -393,7 +393,11 @@ async def agent_supervisor() -> None:
     never followed by another one.
     """
     attempts: list[float] = []
-    last_launch = 0.0
+    # The boot script launches the gateway right after starting this API, so the first launch is
+    # "now", not "never": starting at 0.0 made the first pass (20 s in) see a live, still-binding
+    # gateway as one that "has served nothing since the last start" and kill it - restarting the
+    # minutes-long startup on every boot.
+    last_launch = time.time()
     while True:
         await asyncio.sleep(20)
         try:
