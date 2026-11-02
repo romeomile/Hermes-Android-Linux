@@ -8,7 +8,7 @@ API server over device loopback. No root, no Termux, no PC, no server to rent.
 
 - Repo: `romeomile/Hermes-Android-Linux` (**public** since 2026-10-07)
 - Package: `com.romirmile.hermeslinux` (deliberately different from the other Hermes app, so both can
-  be installed side by side), namespace `com.romirmile.hermes`, versionCode **20**, versionName **1.2.0**
+  be installed side by side), namespace `com.romirmile.hermes`, versionCode **23**, versionName **1.2.3**
 - minSdk 26, target/compile 35, **arm64-v8a only** (the QEMU binaries are arm64)
 
 ## Layout
@@ -550,6 +550,42 @@ Two more things the same screen exposed, both fixed in the app layer:
 
 The guest image is unchanged, so the extraction marker is unchanged: this update does **not** reset
 the guest, unlike 1.0.9. `versionCode 12`, `versionName 1.0.10`.
+
+### 1.2.3 — failed turns say why, tool cards finish, the engine is the default endpoint, and CI
+
+Method: the v1.2.2 guest disk (qcow2 → raw → ext4) run under `qemu-aarch64` user-mode in a chroot on an
+x86_64 host — gateway up in seconds instead of minutes — with a stub OpenAI-compatible provider, and the
+app's own requests sent to it. The guest side worked end to end (stream, tools, `/agent/config`, restart);
+the faults were in the app's reading of what the gateway sends.
+
+* **A failed turn showed an empty bubble.** With no key, an unreachable provider or a bad model, Hermes
+  answers HTTP 200 and ends the stream with `finish_reason: "error"` plus
+  `{"error": {"message": …}, "hermes": {"failed": true, …}}`. The client only read `delta.content`, so
+  the reply was blank and no reason was shown. Now `FailureKind.AGENT` carries the agent's message
+  (`error_agent_failed` points at the Engine screen's model setup).
+* **"Check the agent" said OK for that same failure** — the non-streaming 200 has the error text in
+  `message.content`. The probe now throws `AgentReplyException` with the agent's error.
+* **Tool cards never finished.** Hermes sends `event: hermes.tool.progress` with
+  `{tool, label, toolCallId, status: running|completed}`. The parser took the phase from the event name
+  ("progress"), so every completion became another start. It reads `status` and `label` now; completed
+  tools are no longer dropped when the next one starts, a finished turn leaves nothing running, and chats
+  loaded after a restart have no spinner left over.
+* **"No gateway endpoint is set" on a fresh install.** The endpoint was filled in only once the agent was
+  READY, so the first message, sent while the VM booted, failed. A blank endpoint now means the on-device
+  engine (and joins the startup wait); while it is the endpoint, its key is always the device token. The
+  local endpoint is recognised however it is typed (`/v1`, `localhost`, no scheme).
+* **Guest supervisor (next image only):** `last_launch` started at 0, so the first pass, 20 s after boot,
+  killed the gateway the boot had just launched and was still binding. Verified in the chroot: a live
+  gateway is left alone, a killed one is restarted on the next pass.
+
+**CI** (`.github/workflows/build.yml`): compiles the APK, runs JVM tests that replay streams recorded
+verbatim from the shipped gateway (`app/src/test/resources/streams`), and syntax-checks the guest
+scripts. It does not rebuild the guest: `scripts/fetch_released_image.sh` restores `assets/vm/base.qcow2`
+from the release named in `image/RELEASED_IMAGE`, checks its hash and passes that release's marker as
+`-PguestImageSha256`, so an APK built this way does **not** reset installed guests. The CI APK is signed
+with the runner's debug key, so it installs only after uninstalling a build signed elsewhere.
+
+`versionCode 23`, `versionName 1.2.3`. Guest image unchanged (marker `3f4f3c32…`).
 
 ### 1.2.2 — "Check the agent" tests the model instead of reading a list
 

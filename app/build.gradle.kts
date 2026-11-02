@@ -51,8 +51,8 @@ android {
         applicationId = "com.romirmile.hermeslinux"
         minSdk = 26
         targetSdk = 35
-        versionCode = 22
-        versionName = "1.2.2"
+        versionCode = 23
+        versionName = "1.2.3"
         ndk { abiFilters += "arm64-v8a" }
         buildConfigField("String", "GUEST_IMAGE_SHA256", "\"$guestImageSha256\"")
     }
