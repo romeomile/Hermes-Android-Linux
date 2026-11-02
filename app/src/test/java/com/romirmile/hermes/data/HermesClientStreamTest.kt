@@ -1,7 +1,6 @@
 package com.romirmile.hermes.data
 
 import com.romirmile.hermes.ChatTurn
-import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -10,7 +9,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.net.InetSocketAddress
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
+import kotlin.concurrent.thread
 
 /**
  * Replays streams recorded from a real Hermes 0.21.3 gateway (the guest image the app ships) through
@@ -22,26 +24,53 @@ import java.net.InetSocketAddress
  */
 class HermesClientStreamTest {
 
-    private lateinit var server: HttpServer
-    private var body: String = ""
-    private var contentType: String = "text/event-stream"
-    private val base get() = "http://127.0.0.1:${server.address.port}"
+    // A minimal one-response-per-connection HTTP server: unit tests compile against android.jar, which
+    // has no com.sun.net.httpserver, and a raw socket is all an HttpURLConnection client needs.
+    private lateinit var server: ServerSocket
+    @Volatile private var body: String = ""
+    @Volatile private var contentType: String = "text/event-stream"
+    private val base get() = "http://127.0.0.1:${server.localPort}"
 
     @Before
     fun start() {
-        server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/") { exchange ->
-            exchange.requestBody.readBytes()
-            val bytes = body.toByteArray()
-            exchange.responseHeaders.add("Content-Type", contentType)
-            exchange.sendResponseHeaders(200, bytes.size.toLong())
-            exchange.responseBody.use { it.write(bytes) }
+        server = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
+        thread(isDaemon = true) {
+            while (!server.isClosed) {
+                val socket = runCatching { server.accept() }.getOrNull() ?: break
+                runCatching { answer(socket) }
+                runCatching { socket.close() }
+            }
         }
-        server.start()
+    }
+
+    private fun answer(socket: Socket) {
+        val input = socket.getInputStream()
+        // Request line and headers, up to the blank line; then the body by Content-Length.
+        val head = StringBuilder()
+        while (!head.endsWith("\r\n\r\n")) {
+            val b = input.read()
+            if (b < 0) return
+            head.append(b.toChar())
+        }
+        val length = Regex("(?im)^content-length:\\s*(\\d+)").find(head)?.groupValues?.get(1)?.toInt() ?: 0
+        var remaining = length
+        while (remaining > 0) {
+            val skipped = input.read(ByteArray(remaining))
+            if (skipped < 0) break
+            remaining -= skipped
+        }
+        val bytes = body.toByteArray()
+        val out = socket.getOutputStream()
+        out.write(
+            ("HTTP/1.1 200 OK\r\nContent-Type: $contentType\r\nContent-Length: ${bytes.size}\r\n" +
+                "Connection: close\r\n\r\n").toByteArray()
+        )
+        out.write(bytes)
+        out.flush()
     }
 
     @After
-    fun stop() = server.stop(0)
+    fun stop() = server.close()
 
     private fun fixture(name: String): String =
         javaClass.classLoader!!.getResource("streams/$name")!!.readText()
