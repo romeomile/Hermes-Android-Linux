@@ -12,6 +12,8 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -77,6 +79,7 @@ jobs:
           } > notes.md
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$NAME" "$NAME.sha256" --clobber
+            gh release edit "$TAG" --notes-file notes.md
           else
             gh release create "$TAG" "$NAME" "$NAME.sha256" --title "Hermes Linux $VERSION" --notes-file notes.md
           fi
